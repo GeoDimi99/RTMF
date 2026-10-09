@@ -1,6 +1,6 @@
 <div align="center">
 
-# Making Containerized Real-Time Microservices Practical
+# RTMF - Real-Time Microservices Framework
 ### *A Framework for Automated Deployment and Coordination*
 
 </div>
