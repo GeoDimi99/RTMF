@@ -1,0 +1,30 @@
+# Build artifacts (stale CMake caches from host break in-container builds)
+**/build/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/cmake_install.cmake
+**/Makefile
+
+# Object / binary files
+**/*.o
+**/*.a
+**/*.so
+**/*.so.*
+
+# Editor / VCS / OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# Python caches (sdk/, scripts/)
+**/__pycache__/
+**/*.pyc
+**/.cache/
+
+# Logs and reports (not needed inside images)
+*.log
+*.csv
+*.pdf
+nohup.out

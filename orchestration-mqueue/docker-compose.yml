@@ -1,0 +1,43 @@
+
+services:
+  
+  redis:
+    image: "redis:8.4"
+    cpuset: "4"
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  deploy-manager:
+    build:
+      context: .
+      dockerfile: ./services/deploy-manager/Dockerfile
+    restart: "no"
+    container_name: deploy-manager
+    cpuset: "4"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+
+  execution-manager:
+    build:
+      context: .
+      dockerfile: ./services/execution-manager/Dockerfile
+    ipc: host
+    cpuset: "4"
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    ulimits:
+      rtprio: 99
+      memlock:
+        soft: -1
+        hard: -1
+    restart: "no"
+    container_name: execution-manager
+    depends_on:
+     - redis
+     - deploy-manager
+  
+

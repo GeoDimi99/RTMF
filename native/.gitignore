@@ -1,0 +1,28 @@
+# Environment
+.env
+
+# Build artifacts
+build/
+*.o
+*.obj
+*.so
+*.a
+
+# Logs and runtime output
+*.log
+output.log
+
+# Generated context dump (docs/generate_context.py)
+docs/project_context*.txt
+
+# OS / editor metadata
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Report tooling virtualenv
+.venv/

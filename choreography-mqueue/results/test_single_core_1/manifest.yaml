@@ -1,0 +1,143 @@
+version: "1.0"
+
+images:
+  base: "jeffadac/task-wrapper:latest"
+  repo: "jeffadac/task-wrapper"
+  tasks:
+    - alias: "stress_task_1"
+      src: "stress_task_1"
+    - alias: "stress_task_2"
+      src: "stress_task_2"
+    - alias: "stress_task_3"
+      src: "stress_task_3"
+    - alias: "stress_task_4"
+      src: "stress_task_4"
+    - alias: "stress_task_5"
+      src: "stress_task_5"
+    - alias: "stress_task_6"
+      src: "stress_task_6"
+   
+schedule:
+  name: "Configurable CPU/IO Benchmark"
+  description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
+  iterations: 5
+  
+  tasks:
+    # Pure CPU workload
+    - id: 1
+      image: "stress_task_1"
+      start: 50
+      deadline: 650
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 50
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int
+
+    - id: 2
+      image: "stress_task_2"
+      start: 300
+      deadline: 1300
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 50
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int
+
+
+    - id: 3
+      image: "stress_task_3"
+      start: 350
+      deadline: 950
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 70
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int
+
+    - id: 4
+      image: "stress_task_4"
+      start: 370
+      deadline: 970
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int
+
+
+    - id: 5
+      image: "stress_task_5"
+      start: 600
+      deadline: 1200
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int
+
+
+
+    - id: 6
+      image: "stress_task_6"
+      start: 650
+      deadline: 1250
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 17
+        io_percentage:
+          type: int
+          value: 0      
+      outputs:
+        result:
+          type: int

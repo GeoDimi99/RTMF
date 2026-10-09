@@ -1,0 +1,28 @@
+# Secrets / local env
+.env
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# C / CMake build artifacts
+build/
+*.o
+*.obj
+*.so
+*.a
+
+# Editors / IDE
+.vscode/
+.idea/
+
+# Logs / runtime artifacts
+*.log
+*.tmp

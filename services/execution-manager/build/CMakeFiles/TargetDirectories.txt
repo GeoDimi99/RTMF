@@ -1,3 +1,0 @@
-/home/vboxuser/projects/RT-microservices-native/services/execution-manager/build/CMakeFiles/execution-manager.dir
-/home/vboxuser/projects/RT-microservices-native/services/execution-manager/build/CMakeFiles/edit_cache.dir
-/home/vboxuser/projects/RT-microservices-native/services/execution-manager/build/CMakeFiles/rebuild_cache.dir

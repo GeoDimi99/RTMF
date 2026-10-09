@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+
+# Build artifacts
+build/
+*.o
+*.so
+
+# Logs and results (kept out of the repo)
+logs/
+logs_*/
+*.log
+*.csv
+*.pdf
+iteration_*.png
+global_stats.png
+task_stats.png

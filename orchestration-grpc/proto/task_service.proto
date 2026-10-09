@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package taskservice;
+
+// Service definition
+service TaskExecutor {
+  // Execute a task asynchronously with streaming responses
+  // First response: ACK (task started)
+  // Second response: RESULT (task completed)
+  rpc ExecuteTaskAsync(TaskRequest) returns (stream TaskResponse);
+  
+  // Legacy synchronous method (kept for compatibility)
+  rpc ExecuteTask(TaskRequest) returns (TaskResponse);
+}
+
+// Request message
+message TaskRequest {
+  uint32 task_id = 1;
+  string task_name = 2;
+  string inputs_json = 3;  // JSON string with task inputs
+  int32 priority = 4;
+  string policy = 5;
+  optional int32 cpu_affinity = 6;  // CPU core to pin the task thread to (unset = no explicit pinning)
+}
+
+// Response message
+message TaskResponse {
+  uint32 task_id = 1;
+  string status = 2;       // "STARTED", "COMPLETED", "ERROR"
+  string result_json = 3;  // JSON string with task outputs (empty for STARTED)
+  string error_message = 4;
+  // Performance timestamps (CLOCK_MONOTONIC, ns) and CPU core, set by the
+  // server only on the "COMPLETED" response.
+  int64 end_time_request = 5;   // When the task thread began execution
+  int64 start_time_result = 6;  // When the task thread finished execution
+  int32 core_id = 7;            // CPU core the task thread actually ran on
+}

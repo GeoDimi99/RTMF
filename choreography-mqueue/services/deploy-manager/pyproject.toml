@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deploy-manager"
+version = "0.0.0" 
+description = "Deploy Manager for Real-Time Microservices"
+requires-python = "==3.14.*"
+
+dependencies = [
+    "PyYAML==6.0.3",
+    "docker==7.1.0",
+    "redis==7.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

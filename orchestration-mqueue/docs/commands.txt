@@ -1,0 +1,15 @@
+
+# New commands 
+
+# Remember to remove the old queues 
+sudo rm -f /dev/mqueue/*
+
+# Build
+sudo docker build -t execution-manager -f services/execution-manager/Dockerfile . 
+sudo docker build  -t stress_task -f services/task-wrapper/Dockerfile .
+
+  
+# Run
+sudo docker run --rm --ipc=host --name execution-manager execution-manager:latest
+sudo docker run --rm --ipc=host --cap-add=SYS_NICE --ulimit rtprio=99 -e TASK_NAME=stress_task -e TASK_QUEUE_NAME=stress_task --cap-add=IPC_LOCK --ulimit memlock=-1:-1 --name stress_task stress_task:latest
+

@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+
+# --- C/C++ build artifacts ---
+*.o
+*.obj
+*.so
+*.dylib
+*.a
+*.exe
+build/
+cmake-build-*/
+
+# --- Auto-generated gRPC / protobuf code ---
+proto/proto/*.pb.cc
+proto/proto/*.pb.h
+proto/proto/*.grpc.pb.cc
+proto/proto/*.grpc.pb.h
+
+# --- Editor / OS metadata ---
+.DS_Store
+*.swp
+*.swo
+*.bak
+*~
+.idea/
+.vscode/
+
+# --- Runtime artifacts / outputs ---
+nohup.out
+*.log
+*.csv
+*.pdf
+
+# --- Runtime / experiment outputs ---
+test_run_*/
+risultati/
+output_run/
+deploy_manager_*.log
+execution_manager_*.log
+execution_manager_*.csv
+
+# --- Local manifest backups ---
+task/manifest.yaml.backup

@@ -1,0 +1,2958 @@
+Project Context for: RealTime-Microservices
+==================================================
+
+=== DIRECTORY STRUCTURE ===
+RealTime-Microservices/
+    README.md
+    docker-compose.yml
+    tests/
+        task_entry_2.h
+        task_entry_1.h
+        task_entry_3.h
+        builder/
+    docs/
+        generate_context.py
+    common/
+        CMakeLists.txt
+        include/
+            task.h
+            jsmn.h
+            task_ipc.h
+            logger.h
+        src/
+            task_ipc.c
+            logger.c
+            task.c
+    services/
+        execution-manager/
+            CMakeLists.txt
+            Dockerfile
+            include/
+                schedule.h
+                execution_manager.h
+            src/
+                redis_reader.c
+                schedule.c
+                execution_manager.c
+                main.c
+        task-service/
+            CMakeLists.txt
+            Dockerfile
+            include/
+                task_service.h
+                task_entry.h
+            src/
+                main.c
+                task_service.c
+        deploy-manager/
+            Dockerfile
+            pyproject.toml
+            src/
+                __init__.py
+                logger.py
+                exceptions.py
+                main.py
+                database/
+                    __init__.py
+                    redis_loader.py
+                deploy/
+                    runner.py
+                    __init__.py
+                manifest/
+                    manifest_fetcher.py
+                    __init__.py
+                    parser.py
+                domain/
+                    task.py
+                    __init__.py
+                    schedule.py
+
+=== FILE CONTENTS ===
+
+--- START FILE: README.md ---
+# RealTime Microservices
+
+--- END FILE: README.md ---
+
+--- START FILE: docker-compose.yml ---
+
+services:
+  
+  redis:
+    image: "redis:8.4"
+    cpuset: "1"
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  deploy-manager:
+    build:
+      context: . 
+      dockerfile: ./services/deploy-manager/Dockerfile
+    cpuset: "1"
+    container_name: deploy-manager
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+    
+
+  exection-manager:
+    build:
+      context: . 
+      dockerfile: ./services/execution-manager/Dockerfile
+    cpuset: "1"
+    container_name: execution-manager
+    depends_on:
+     - redis
+     - deploy-manager
+  
+
+
+--- END FILE: docker-compose.yml ---
+
+--- START FILE: tests/task_entry_2.h ---
+#ifndef TASK_ENTRY_H
+#define TASK_ENTRY_H
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>     /* Required for atoi */
+#include <pthread.h>    /* Required for pthread_mutex_t */
+#include "jsmn.h"
+#include "task_ipc.h"   /* Required for task_service_state_t (IDLE, RUNNING, COMPLETED) */
+
+/* --- Data Structures --- */
+
+typedef struct {
+    int a;
+    int b;
+} input_t;
+
+typedef struct {
+    int result;
+} output_t;
+
+/* * Shared Context Structure.
+ * This resides in the heap and is accessed by both Main and Thread.
+ */
+typedef struct {
+    pthread_mutex_t lock;           // Protects access to status and output
+    task_service_state_t status;    // Current state (IDLE, RUNNING, COMPLETED)
+    input_t input;                  // Input data (Read-only for the thread)
+    output_t output;                // Output data (Written by the thread)
+} task_context_t;
+
+
+
+/* --- Helper Function --- */
+
+/*
+ * Compares a JSMN token with a C string.
+ * It handles both standard JSON strings (JSMN_STRING) 
+ * and unquoted keys (JSMN_PRIMITIVE) if strict mode is off.
+ */
+static int json_eq(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING || tok->type == JSMN_PRIMITIVE) {
+        if ((int)strlen(s) == tok->end - tok->start &&
+            strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* --- Task Functions --- */
+
+/* * Input Conversion: JSON String -> Struct 
+ */
+int convert_input(char* input_json, input_t* input){
+    
+    /* Prepare parser and token array */
+    jsmn_parser p;
+    jsmntok_t t[128];   // We expect no more than 128 JSON tokens
+    
+    jsmn_init(&p);
+    
+    /* Parsing execution */
+    int r = jsmn_parse(&p, input_json, strlen(input_json), t, 128); 
+
+    if (r < 0) {
+        // Handle error codes if necessary
+        return -1;
+    }
+
+    /* Scanning the results */
+    /* Assume the top-level element is an object */
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        return -1;
+    }
+
+    /* Loop through tokens (skipping the root object at index 0) */
+    for (int i = 1; i < r; i++) {
+        
+        /* Check for key "a" */
+        if (json_eq(input_json, &t[i], "a")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            // Safety check for buffer size
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            // Copy value to buffer to null-terminate it for atoi
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->a = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+        /* Check for key "b" */
+        else if (json_eq(input_json, &t[i], "b")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->b = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+    }
+    
+    return 0;
+}
+
+/* * Output Conversion: Struct -> JSON String
+ */
+int convert_output(output_t* output, char* output_json) {
+    /* Note: Ensure 'output_json' buffer is large enough in the caller */
+    return sprintf(output_json, "{\"result\": %d}", output->result);
+}
+
+
+/* * MAIN TASK (Worker Thread)
+ * Receives the Context pointer, performs calculations, and writes the result.
+ */
+void *task_main(void *arg){
+    task_context_t *ctx = (task_context_t *)arg;
+
+    /* 1. Update state to RUNNING */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->status = RUNNING; 
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Processing: %d + %d\n", ctx->input.a, ctx->input.b);
+
+    /* 2. Real-Time Logic (Calculations) */
+    /* * Accessing ctx->input is thread-safe here because 
+     * the Main thread does not modify it after creation.
+     */
+    int res = ctx->input.a * ctx->input.b;
+
+    // Simulate heavy workload if needed
+    // usleep(1000); 
+
+    /* 3. Write Output protected by Mutex */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->output.result = res;
+    ctx->status = COMPLETED;
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Job Done. Result: %d\n", res);
+
+    return NULL;
+}
+
+#endif
+--- END FILE: tests/task_entry_2.h ---
+
+--- START FILE: tests/task_entry_1.h ---
+#ifndef TASK_ENTRY_H
+#define TASK_ENTRY_H
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>     /* Required for atoi */
+#include <pthread.h>    /* Required for pthread_mutex_t */
+#include "jsmn.h"
+#include "task_ipc.h"   /* Required for task_service_state_t (IDLE, RUNNING, COMPLETED) */
+
+/* --- Data Structures --- */
+
+typedef struct {
+    int a;
+    int b;
+} input_t;
+
+typedef struct {
+    int result;
+} output_t;
+
+/* * Shared Context Structure.
+ * This resides in the heap and is accessed by both Main and Thread.
+ */
+typedef struct {
+    pthread_mutex_t lock;           // Protects access to status and output
+    task_service_state_t status;    // Current state (IDLE, RUNNING, COMPLETED)
+    input_t input;                  // Input data (Read-only for the thread)
+    output_t output;                // Output data (Written by the thread)
+} task_context_t;
+
+
+
+/* --- Helper Function --- */
+
+/*
+ * Compares a JSMN token with a C string.
+ * It handles both standard JSON strings (JSMN_STRING) 
+ * and unquoted keys (JSMN_PRIMITIVE) if strict mode is off.
+ */
+static int json_eq(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING || tok->type == JSMN_PRIMITIVE) {
+        if ((int)strlen(s) == tok->end - tok->start &&
+            strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* --- Task Functions --- */
+
+/* * Input Conversion: JSON String -> Struct 
+ */
+int convert_input(char* input_json, input_t* input){
+    
+    /* Prepare parser and token array */
+    jsmn_parser p;
+    jsmntok_t t[128];   // We expect no more than 128 JSON tokens
+    
+    jsmn_init(&p);
+    
+    /* Parsing execution */
+    int r = jsmn_parse(&p, input_json, strlen(input_json), t, 128); 
+
+    if (r < 0) {
+        // Handle error codes if necessary
+        return -1;
+    }
+
+    /* Scanning the results */
+    /* Assume the top-level element is an object */
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        return -1;
+    }
+
+    /* Loop through tokens (skipping the root object at index 0) */
+    for (int i = 1; i < r; i++) {
+        
+        /* Check for key "a" */
+        if (json_eq(input_json, &t[i], "a")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            // Safety check for buffer size
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            // Copy value to buffer to null-terminate it for atoi
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->a = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+        /* Check for key "b" */
+        else if (json_eq(input_json, &t[i], "b")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->b = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+    }
+    
+    return 0;
+}
+
+/* * Output Conversion: Struct -> JSON String
+ */
+int convert_output(output_t* output, char* output_json) {
+    /* Note: Ensure 'output_json' buffer is large enough in the caller */
+    return sprintf(output_json, "{\"result\": %d}", output->result);
+}
+
+
+/* * MAIN TASK (Worker Thread)
+ * Receives the Context pointer, performs calculations, and writes the result.
+ */
+void *task_main(void *arg){
+    task_context_t *ctx = (task_context_t *)arg;
+
+    /* 1. Update state to RUNNING */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->status = RUNNING; 
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Processing: %d + %d\n", ctx->input.a, ctx->input.b);
+
+    /* 2. Real-Time Logic (Calculations) */
+    /* * Accessing ctx->input is thread-safe here because 
+     * the Main thread does not modify it after creation.
+     */
+    int res = ctx->input.a + ctx->input.b;
+
+    // Simulate heavy workload if needed
+    // usleep(1000); 
+
+    /* 3. Write Output protected by Mutex */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->output.result = res;
+    ctx->status = COMPLETED;
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Job Done. Result: %d\n", res);
+
+    return NULL;
+}
+
+#endif
+--- END FILE: tests/task_entry_1.h ---
+
+--- START FILE: tests/task_entry_3.h ---
+#ifndef TASK_ENTRY_H
+#define TASK_ENTRY_H
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>     /* Required for atoi */
+#include <pthread.h>    /* Required for pthread_mutex_t */
+#include "jsmn.h"
+#include "task_ipc.h"   /* Required for task_service_state_t (IDLE, RUNNING, COMPLETED) */
+
+/* --- Data Structures --- */
+
+typedef struct {
+    int a;
+    int b;
+} input_t;
+
+typedef struct {
+    int result;
+} output_t;
+
+/* * Shared Context Structure.
+ * This resides in the heap and is accessed by both Main and Thread.
+ */
+typedef struct {
+    pthread_mutex_t lock;           // Protects access to status and output
+    task_service_state_t status;    // Current state (IDLE, RUNNING, COMPLETED)
+    input_t input;                  // Input data (Read-only for the thread)
+    output_t output;                // Output data (Written by the thread)
+} task_context_t;
+
+
+
+/* --- Helper Function --- */
+
+/*
+ * Compares a JSMN token with a C string.
+ * It handles both standard JSON strings (JSMN_STRING) 
+ * and unquoted keys (JSMN_PRIMITIVE) if strict mode is off.
+ */
+static int json_eq(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING || tok->type == JSMN_PRIMITIVE) {
+        if ((int)strlen(s) == tok->end - tok->start &&
+            strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* --- Task Functions --- */
+
+/* * Input Conversion: JSON String -> Struct 
+ */
+int convert_input(char* input_json, input_t* input){
+    
+    /* Prepare parser and token array */
+    jsmn_parser p;
+    jsmntok_t t[128];   // We expect no more than 128 JSON tokens
+    
+    jsmn_init(&p);
+    
+    /* Parsing execution */
+    int r = jsmn_parse(&p, input_json, strlen(input_json), t, 128); 
+
+    if (r < 0) {
+        // Handle error codes if necessary
+        return -1;
+    }
+
+    /* Scanning the results */
+    /* Assume the top-level element is an object */
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        return -1;
+    }
+
+    /* Loop through tokens (skipping the root object at index 0) */
+    for (int i = 1; i < r; i++) {
+        
+        /* Check for key "a" */
+        if (json_eq(input_json, &t[i], "a")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            // Safety check for buffer size
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            // Copy value to buffer to null-terminate it for atoi
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->a = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+        /* Check for key "b" */
+        else if (json_eq(input_json, &t[i], "b")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->b = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+    }
+    
+    return 0;
+}
+
+/* * Output Conversion: Struct -> JSON String
+ */
+int convert_output(output_t* output, char* output_json) {
+    /* Note: Ensure 'output_json' buffer is large enough in the caller */
+    return sprintf(output_json, "{\"result\": %d}", output->result);
+}
+
+
+/* * MAIN TASK (Worker Thread)
+ * Receives the Context pointer, performs calculations, and writes the result.
+ */
+void *task_main(void *arg){
+    task_context_t *ctx = (task_context_t *)arg;
+
+    /* 1. Update state to RUNNING */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->status = RUNNING; 
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Processing: %d + %d\n", ctx->input.a, ctx->input.b);
+
+    /* 2. Real-Time Logic (Calculations) */
+    /* * Accessing ctx->input is thread-safe here because 
+     * the Main thread does not modify it after creation.
+     */
+    int res = ctx->input.a / ctx->input.b;
+
+    // Simulate heavy workload if needed
+    // usleep(1000); 
+
+    /* 3. Write Output protected by Mutex */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->output.result = res;
+    ctx->status = COMPLETED;
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Job Done. Result: %d\n", res);
+
+    return NULL;
+}
+
+#endif
+--- END FILE: tests/task_entry_3.h ---
+
+--- START FILE: common/CMakeLists.txt ---
+cmake_minimum_required(VERSION 3.20)
+project(common C)
+
+# Optional: create a static library for common code
+add_library(common STATIC)
+
+# Include directories for headers
+target_include_directories(common PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# Add source files if you have .c in common/src
+target_sources(common PRIVATE   src/logger.c 
+                                src/task_ipc.c
+                                src/task.c
+                                )
+
+# If you only have headers, the library can be empty
+--- END FILE: common/CMakeLists.txt ---
+
+--- START FILE: common/include/task.h ---
+#ifndef TASK_H
+#define TASK_H
+
+#include <stdint.h>
+#include <string.h>
+
+#define MAX_TASK_NAME        64
+#define MAX_TASK_JSON_IN     512
+#define MAX_TASK_JSON_OUT    512
+
+#define MIN_TASK_PRIORITY 0
+#define MAX_TASK_PRIORITY 99
+
+/* Scheduling Policies */
+typedef enum {
+    SCHED_POLICY_OTHER = 0,
+    SCHED_POLICY_FIFO  = 1,
+    SCHED_POLICY_RR    = 2
+} sched_policy_t;
+
+/* Task struct */
+typedef struct {
+    char task_name[MAX_TASK_NAME];
+    sched_policy_t policy;
+    uint8_t priority;  /* 0–99 */
+    char input[MAX_TASK_JSON_IN];
+    char output[MAX_TASK_JSON_OUT];
+} task_t;
+
+int init_task(task_t* task, const char* name, sched_policy_t policy, uint8_t priority, const char* input, const char* output);
+
+
+#endif /* TASK_H */
+
+--- END FILE: common/include/task.h ---
+
+--- START FILE: common/include/jsmn.h ---
+/*
+ * MIT License
+ *
+ * Copyright (c) 2010 Serge Zaitsev
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+#ifndef JSMN_H
+#define JSMN_H
+
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifdef JSMN_STATIC
+#define JSMN_API static
+#else
+#define JSMN_API extern
+#endif
+
+/**
+ * JSON type identifier. Basic types are:
+ * 	o Object
+ * 	o Array
+ * 	o String
+ * 	o Other primitive: number, boolean (true/false) or null
+ */
+typedef enum {
+  JSMN_UNDEFINED = 0,
+  JSMN_OBJECT = 1 << 0,
+  JSMN_ARRAY = 1 << 1,
+  JSMN_STRING = 1 << 2,
+  JSMN_PRIMITIVE = 1 << 3
+} jsmntype_t;
+
+enum jsmnerr {
+  /* Not enough tokens were provided */
+  JSMN_ERROR_NOMEM = -1,
+  /* Invalid character inside JSON string */
+  JSMN_ERROR_INVAL = -2,
+  /* The string is not a full JSON packet, more bytes expected */
+  JSMN_ERROR_PART = -3
+};
+
+/**
+ * JSON token description.
+ * type		type (object, array, string etc.)
+ * start	start position in JSON data string
+ * end		end position in JSON data string
+ */
+typedef struct jsmntok {
+  jsmntype_t type;
+  int start;
+  int end;
+  int size;
+#ifdef JSMN_PARENT_LINKS
+  int parent;
+#endif
+} jsmntok_t;
+
+/**
+ * JSON parser. Contains an array of token blocks available. Also stores
+ * the string being parsed now and current position in that string.
+ */
+typedef struct jsmn_parser {
+  unsigned int pos;     /* offset in the JSON string */
+  unsigned int toknext; /* next token to allocate */
+  int toksuper;         /* superior token node, e.g. parent object or array */
+} jsmn_parser;
+
+/**
+ * Create JSON parser over an array of tokens
+ */
+JSMN_API void jsmn_init(jsmn_parser *parser);
+
+/**
+ * Run JSON parser. It parses a JSON data string into and array of tokens, each
+ * describing
+ * a single JSON object.
+ */
+JSMN_API int jsmn_parse(jsmn_parser *parser, const char *js, const size_t len,
+                        jsmntok_t *tokens, const unsigned int num_tokens);
+
+#ifndef JSMN_HEADER
+/**
+ * Allocates a fresh unused token from the token pool.
+ */
+static jsmntok_t *jsmn_alloc_token(jsmn_parser *parser, jsmntok_t *tokens,
+                                   const size_t num_tokens) {
+  jsmntok_t *tok;
+  if (parser->toknext >= num_tokens) {
+    return NULL;
+  }
+  tok = &tokens[parser->toknext++];
+  tok->start = tok->end = -1;
+  tok->size = 0;
+#ifdef JSMN_PARENT_LINKS
+  tok->parent = -1;
+#endif
+  return tok;
+}
+
+/**
+ * Fills token type and boundaries.
+ */
+static void jsmn_fill_token(jsmntok_t *token, const jsmntype_t type,
+                            const int start, const int end) {
+  token->type = type;
+  token->start = start;
+  token->end = end;
+  token->size = 0;
+}
+
+/**
+ * Fills next available token with JSON primitive.
+ */
+static int jsmn_parse_primitive(jsmn_parser *parser, const char *js,
+                                const size_t len, jsmntok_t *tokens,
+                                const size_t num_tokens) {
+  jsmntok_t *token;
+  int start;
+
+  start = parser->pos;
+
+  for (; parser->pos < len && js[parser->pos] != '\0'; parser->pos++) {
+    switch (js[parser->pos]) {
+#ifndef JSMN_STRICT
+    /* In strict mode primitive must be followed by "," or "}" or "]" */
+    case ':':
+#endif
+    case '\t':
+    case '\r':
+    case '\n':
+    case ' ':
+    case ',':
+    case ']':
+    case '}':
+      goto found;
+    default:
+                   /* to quiet a warning from gcc*/
+      break;
+    }
+    if (js[parser->pos] < 32 || js[parser->pos] >= 127) {
+      parser->pos = start;
+      return JSMN_ERROR_INVAL;
+    }
+  }
+#ifdef JSMN_STRICT
+  /* In strict mode primitive must be followed by a comma/object/array */
+  parser->pos = start;
+  return JSMN_ERROR_PART;
+#endif
+
+found:
+  if (tokens == NULL) {
+    parser->pos--;
+    return 0;
+  }
+  token = jsmn_alloc_token(parser, tokens, num_tokens);
+  if (token == NULL) {
+    parser->pos = start;
+    return JSMN_ERROR_NOMEM;
+  }
+  jsmn_fill_token(token, JSMN_PRIMITIVE, start, parser->pos);
+#ifdef JSMN_PARENT_LINKS
+  token->parent = parser->toksuper;
+#endif
+  parser->pos--;
+  return 0;
+}
+
+/**
+ * Fills next token with JSON string.
+ */
+static int jsmn_parse_string(jsmn_parser *parser, const char *js,
+                             const size_t len, jsmntok_t *tokens,
+                             const size_t num_tokens) {
+  jsmntok_t *token;
+
+  int start = parser->pos;
+  
+  /* Skip starting quote */
+  parser->pos++;
+  
+  for (; parser->pos < len && js[parser->pos] != '\0'; parser->pos++) {
+    char c = js[parser->pos];
+
+    /* Quote: end of string */
+    if (c == '\"') {
+      if (tokens == NULL) {
+        return 0;
+      }
+      token = jsmn_alloc_token(parser, tokens, num_tokens);
+      if (token == NULL) {
+        parser->pos = start;
+        return JSMN_ERROR_NOMEM;
+      }
+      jsmn_fill_token(token, JSMN_STRING, start + 1, parser->pos);
+#ifdef JSMN_PARENT_LINKS
+      token->parent = parser->toksuper;
+#endif
+      return 0;
+    }
+
+    /* Backslash: Quoted symbol expected */
+    if (c == '\\' && parser->pos + 1 < len) {
+      int i;
+      parser->pos++;
+      switch (js[parser->pos]) {
+      /* Allowed escaped symbols */
+      case '\"':
+      case '/':
+      case '\\':
+      case 'b':
+      case 'f':
+      case 'r':
+      case 'n':
+      case 't':
+        break;
+      /* Allows escaped symbol \uXXXX */
+      case 'u':
+        parser->pos++;
+        for (i = 0; i < 4 && parser->pos < len && js[parser->pos] != '\0';
+             i++) {
+          /* If it isn't a hex character we have an error */
+          if (!((js[parser->pos] >= 48 && js[parser->pos] <= 57) ||   /* 0-9 */
+                (js[parser->pos] >= 65 && js[parser->pos] <= 70) ||   /* A-F */
+                (js[parser->pos] >= 97 && js[parser->pos] <= 102))) { /* a-f */
+            parser->pos = start;
+            return JSMN_ERROR_INVAL;
+          }
+          parser->pos++;
+        }
+        parser->pos--;
+        break;
+      /* Unexpected symbol */
+      default:
+        parser->pos = start;
+        return JSMN_ERROR_INVAL;
+      }
+    }
+  }
+  parser->pos = start;
+  return JSMN_ERROR_PART;
+}
+
+/**
+ * Parse JSON string and fill tokens.
+ */
+JSMN_API int jsmn_parse(jsmn_parser *parser, const char *js, const size_t len,
+                        jsmntok_t *tokens, const unsigned int num_tokens) {
+  int r;
+  int i;
+  jsmntok_t *token;
+  int count = parser->toknext;
+
+  for (; parser->pos < len && js[parser->pos] != '\0'; parser->pos++) {
+    char c;
+    jsmntype_t type;
+
+    c = js[parser->pos];
+    switch (c) {
+    case '{':
+    case '[':
+      count++;
+      if (tokens == NULL) {
+        break;
+      }
+      token = jsmn_alloc_token(parser, tokens, num_tokens);
+      if (token == NULL) {
+        return JSMN_ERROR_NOMEM;
+      }
+      if (parser->toksuper != -1) {
+        jsmntok_t *t = &tokens[parser->toksuper];
+#ifdef JSMN_STRICT
+        /* In strict mode an object or array can't become a key */
+        if (t->type == JSMN_OBJECT) {
+          return JSMN_ERROR_INVAL;
+        }
+#endif
+        t->size++;
+#ifdef JSMN_PARENT_LINKS
+        token->parent = parser->toksuper;
+#endif
+      }
+      token->type = (c == '{' ? JSMN_OBJECT : JSMN_ARRAY);
+      token->start = parser->pos;
+      parser->toksuper = parser->toknext - 1;
+      break;
+    case '}':
+    case ']':
+      if (tokens == NULL) {
+        break;
+      }
+      type = (c == '}' ? JSMN_OBJECT : JSMN_ARRAY);
+#ifdef JSMN_PARENT_LINKS
+      if (parser->toknext < 1) {
+        return JSMN_ERROR_INVAL;
+      }
+      token = &tokens[parser->toknext - 1];
+      for (;;) {
+        if (token->start != -1 && token->end == -1) {
+          if (token->type != type) {
+            return JSMN_ERROR_INVAL;
+          }
+          token->end = parser->pos + 1;
+          parser->toksuper = token->parent;
+          break;
+        }
+        if (token->parent == -1) {
+          if (token->type != type || parser->toksuper == -1) {
+            return JSMN_ERROR_INVAL;
+          }
+          break;
+        }
+        token = &tokens[token->parent];
+      }
+#else
+      for (i = parser->toknext - 1; i >= 0; i--) {
+        token = &tokens[i];
+        if (token->start != -1 && token->end == -1) {
+          if (token->type != type) {
+            return JSMN_ERROR_INVAL;
+          }
+          parser->toksuper = -1;
+          token->end = parser->pos + 1;
+          break;
+        }
+      }
+      /* Error if unmatched closing bracket */
+      if (i == -1) {
+        return JSMN_ERROR_INVAL;
+      }
+      for (; i >= 0; i--) {
+        token = &tokens[i];
+        if (token->start != -1 && token->end == -1) {
+          parser->toksuper = i;
+          break;
+        }
+      }
+#endif
+      break;
+    case '\"':
+      r = jsmn_parse_string(parser, js, len, tokens, num_tokens);
+      if (r < 0) {
+        return r;
+      }
+      count++;
+      if (parser->toksuper != -1 && tokens != NULL) {
+        tokens[parser->toksuper].size++;
+      }
+      break;
+    case '\t':
+    case '\r':
+    case '\n':
+    case ' ':
+      break;
+    case ':':
+      parser->toksuper = parser->toknext - 1;
+      break;
+    case ',':
+      if (tokens != NULL && parser->toksuper != -1 &&
+          tokens[parser->toksuper].type != JSMN_ARRAY &&
+          tokens[parser->toksuper].type != JSMN_OBJECT) {
+#ifdef JSMN_PARENT_LINKS
+        parser->toksuper = tokens[parser->toksuper].parent;
+#else
+        for (i = parser->toknext - 1; i >= 0; i--) {
+          if (tokens[i].type == JSMN_ARRAY || tokens[i].type == JSMN_OBJECT) {
+            if (tokens[i].start != -1 && tokens[i].end == -1) {
+              parser->toksuper = i;
+              break;
+            }
+          }
+        }
+#endif
+      }
+      break;
+#ifdef JSMN_STRICT
+    /* In strict mode primitives are: numbers and booleans */
+    case '-':
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+    case 't':
+    case 'f':
+    case 'n':
+      /* And they must not be keys of the object */
+      if (tokens != NULL && parser->toksuper != -1) {
+        const jsmntok_t *t = &tokens[parser->toksuper];
+        if (t->type == JSMN_OBJECT ||
+            (t->type == JSMN_STRING && t->size != 0)) {
+          return JSMN_ERROR_INVAL;
+        }
+      }
+#else
+    /* In non-strict mode every unquoted value is a primitive */
+    default:
+#endif
+      r = jsmn_parse_primitive(parser, js, len, tokens, num_tokens);
+      if (r < 0) {
+        return r;
+      }
+      count++;
+      if (parser->toksuper != -1 && tokens != NULL) {
+        tokens[parser->toksuper].size++;
+      }
+      break;
+
+#ifdef JSMN_STRICT
+    /* Unexpected char in strict mode */
+    default:
+      return JSMN_ERROR_INVAL;
+#endif
+    }
+  }
+
+  if (tokens != NULL) {
+    for (i = parser->toknext - 1; i >= 0; i--) {
+      /* Unmatched opened object or array */
+      if (tokens[i].start != -1 && tokens[i].end == -1) {
+        return JSMN_ERROR_PART;
+      }
+    }
+  }
+
+  return count;
+}
+
+/**
+ * Creates a new parser based over a given buffer with an array of tokens
+ * available.
+ */
+JSMN_API void jsmn_init(jsmn_parser *parser) {
+  parser->pos = 0;
+  parser->toknext = 0;
+  parser->toksuper = -1;
+}
+
+#endif /* JSMN_HEADER */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* JSMN_H */
+--- END FILE: common/include/jsmn.h ---
+
+--- START FILE: common/include/task_ipc.h ---
+#ifndef TASK_IPC_H
+#define TASK_IPC_H
+
+#include <stdint.h>
+#include <mqueue.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
+#include "task.h"
+
+/* Max Queue names */
+#define MAX_QUEUE_NAME   64
+
+/* Queue names */
+#define DEFAULT_EM_QUEUE    "/execution_manager"
+#define DEFAULT_TASK_QUEUE  "/task_service"
+
+/* --- Data Structures & Enums --- */
+
+/* Message types identifier */
+typedef enum {
+    MSG_TASK_REQUEST = 1,
+    MSG_TASK_ACK,
+    MSG_GET_STATUS,
+    MSG_TASK_STATUS,
+    MSG_GET_RESULTS,
+    MSG_TASK_RESULT
+} msg_type_t;
+
+/* ACK status codes */
+typedef enum {
+    ACK_OK = 0,
+    ACK_ERROR = 1
+} ack_status_t;
+
+/* Service operational states */
+typedef enum {
+    IDLE = 0,
+    RUNNING,
+    COMPLETED
+} task_service_state_t;
+
+/* Main IPC Message Structure */
+typedef struct {
+    msg_type_t type;
+    uint32_t   task_id;
+
+    union {
+        task_t task;                    /* Payload for TASK_REQUEST */
+        ack_status_t ack;               /* Payload for TASK_ACK */
+        task_service_state_t status;    /* Payload for STATUS */
+        char result[MAX_TASK_JSON_OUT]; /* Payload for TASK_RESULT */
+    } data;
+} ipc_msg_t;
+
+/* --- POSIX MQ Helper Prototypes --- */
+
+/* Create a new queue (uses O_CREAT). Exits on failure. */
+mqd_t create_queue(const char *name, int flags);
+
+/* Open an existing queue (no O_CREAT). Returns -1 on failure. */
+mqd_t open_queue(const char *name, int flags);
+
+/* Send a typed message */
+int send_message(mqd_t qd, const ipc_msg_t *msg);
+
+/* Receive a typed message */
+ssize_t receive_message(mqd_t qd, ipc_msg_t *msg);
+
+/* Close the queue descriptor (Process level) */
+void close_queue(mqd_t qd);
+
+/* Unlink/Destroy the queue (System level) */
+void destroy_queue(const char *name);
+
+#endif /* TASK_IPC_H */
+
+--- END FILE: common/include/task_ipc.h ---
+
+--- START FILE: common/include/logger.h ---
+#ifndef LOGGER_H
+#define LOGGER_H
+
+#include <stdio.h>
+
+typedef enum {
+    LOG_INFO,
+    LOG_WARN,
+    LOG_ERROR
+} log_level_t;
+
+/* Log a formatted message */
+void log_message(log_level_t level, const char *source, const char *fmt, ...);
+
+#endif /* LOGGER_H */
+
+--- END FILE: common/include/logger.h ---
+
+--- START FILE: common/src/task_ipc.c ---
+#include "task_ipc.h"
+
+
+/* * Create/Open a queue with O_CREAT.
+ * Note: If the queue creation fails, this function terminates the program.
+ */
+mqd_t create_queue(const char *name, int flags)
+{
+    struct mq_attr attr = {
+        .mq_maxmsg  = 10,               /* Max messages in queue */
+        .mq_msgsize = sizeof(ipc_msg_t), /* Fixed message size */
+    };
+
+    /* flags | O_CREAT ensures the queue is created if it doesn't exist */
+    mqd_t qd = mq_open(name, flags | O_CREAT, 0666, &attr);
+    
+    if (qd == (mqd_t)-1) {
+        perror("mq_open (create) failed");
+        exit(EXIT_FAILURE);
+    }
+    return qd;
+}
+
+/* * Open an existing queue WITHOUT O_CREAT.
+ * Returns -1 on failure, allowing the caller to handle the error (e.g., polling).
+ */
+mqd_t open_queue(const char *name, int flags)
+{
+    /* Explicitly remove O_CREAT to ensure we only open existing queues */
+    flags &= ~O_CREAT; 
+
+    mqd_t qd = mq_open(name, flags);
+    
+    /* We do NOT exit here. We return the error to the caller. */
+    return qd;
+}
+
+/* * Send a message to the queue. 
+ * Returns 0 on success, -1 on failure.
+ */
+int send_message(mqd_t qd, const ipc_msg_t *msg)
+{
+    return mq_send(qd, (const char *)msg, sizeof(*msg), 0);
+}
+
+/* * Receive a message from the queue.
+ * Returns 1 on success, 0 if empty (non-blocking), -1 on error.
+ */
+ssize_t receive_message(mqd_t qd, ipc_msg_t *msg)
+{
+    return mq_receive(qd, (char *)msg, sizeof(*msg), NULL);
+}
+
+/* Close the descriptor. Does not remove the queue from the system. */
+void close_queue(mqd_t qd)
+{
+    if (mq_close(qd) == -1) {
+        perror("Warning: mq_close failed");
+    }
+}
+
+/* Remove the queue from the kernel. Critical for cleanup. */
+void destroy_queue(const char *name)
+{
+    /* mq_unlink returns -1 if the queue doesn't exist (ENOENT), which is fine. */
+    if (mq_unlink(name) == -1) {
+        if (errno != ENOENT) {
+            perror("Warning: mq_unlink failed");
+        }
+    }
+}
+--- END FILE: common/src/task_ipc.c ---
+
+--- START FILE: common/src/logger.c ---
+#include "logger.h"
+#include <time.h>
+#include <stdarg.h>
+
+/* Get timestamp in "YYYY-MM-DD HH:MM:SS,ms" format */
+static void get_timestamp(char *buffer, size_t len) {
+    struct timespec ts;
+    struct tm tm_info;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    localtime_r(&ts.tv_sec, &tm_info);
+
+    int ms = ts.tv_nsec / 1000000;
+
+    snprintf(buffer, len, "%04d-%02d-%02d %02d:%02d:%02d,%03d",
+             tm_info.tm_year + 1900,
+             tm_info.tm_mon + 1,
+             tm_info.tm_mday,
+             tm_info.tm_hour,
+             tm_info.tm_min,
+             tm_info.tm_sec,
+             ms);
+}
+
+void log_message(log_level_t level, const char *source, const char *fmt, ...) {
+    static const char *level_str[] = {"INFO", "WARN", "ERROR"};
+
+    char timestamp[32];
+    get_timestamp(timestamp, sizeof(timestamp));
+
+    // Build formatted message
+    va_list args;
+    va_start(args, fmt);
+
+    printf("%s [%s] %s: ", timestamp, level_str[level], source);
+    vprintf(fmt, args);
+    
+
+
+    va_end(args);
+
+    // Optionally flush immediately for RT logging
+    fflush(stdout);
+}
+
+--- END FILE: common/src/logger.c ---
+
+--- START FILE: common/src/task.c ---
+#include <stdio.h>
+#include "task.h"
+
+/**
+ * Initializes a task structure with the provided parameters.
+ */
+int init_task(task_t* task,
+              const char* name,
+              sched_policy_t policy,
+              uint8_t priority,
+              const char* input,
+              const char* output)
+{
+    /* Validate that the task pointer is not NULL */
+    if (!task) 
+        return -1;
+
+    /* Validate that the priority is within allowed range */
+    if (priority > MAX_TASK_PRIORITY) 
+        return -1;
+
+    /* Validate that the scheduling policy is one of the defined values */
+    if (policy < SCHED_POLICY_OTHER || policy > SCHED_POLICY_RR) 
+        return -1;
+
+    /* Copy the task name, ensuring it fits in the fixed-size buffer */
+    snprintf(task->task_name, MAX_TASK_NAME, "%s", name);
+
+    /* Initialize scheduling parameters */
+    task->policy   = policy;
+    task->priority = priority;
+
+    /* Copy the input buffer, truncated if too long */
+    snprintf(task->input, MAX_TASK_JSON_IN, "%s", input);
+
+    /* Copy the output buffer, truncated if too long */
+    snprintf(task->output, MAX_TASK_JSON_OUT, "%s", output);
+
+    /* Initialization successful */
+    return 0;
+}
+
+--- END FILE: common/src/task.c ---
+
+--- START FILE: services/execution-manager/CMakeLists.txt ---
+cmake_minimum_required(VERSION 3.20)
+project(task_service C)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2")
+
+# Include directories
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/../common/include)
+
+# Add executable
+add_executable(execution-manager
+    src/main.c
+    src/execution_manager.c
+    src/schedule.c
+    ../common/src/logger.c  # directly add logger.c to build
+    ../common/src/task_ipc.c
+    ../common/src/task.c
+    
+
+)
+
+# Threads
+find_package(Threads REQUIRED)
+target_link_libraries(execution-manager PRIVATE Threads::Threads hiredis)
+
+--- END FILE: services/execution-manager/CMakeLists.txt ---
+
+--- START FILE: services/execution-manager/Dockerfile ---
+FROM ubuntu:24.04
+
+# Install build tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        libhiredis-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy common headers
+COPY common/ ./common/
+
+# Copy execution-manager source
+COPY services/execution-manager/ ./execution-manager/
+
+WORKDIR /app/execution-manager
+
+# Configure and build
+RUN cmake -S . -B build
+RUN cmake --build build
+
+ENTRYPOINT ["./build/execution-manager"]
+
+--- END FILE: services/execution-manager/Dockerfile ---
+
+--- START FILE: services/execution-manager/include/schedule.h ---
+#ifndef SCHEDULE_H
+#define SCHEDULE_H
+
+#include <string.h>
+#include "task.h"
+
+#define MAX_SCHEDULE_NAME 64
+#define MAX_SCHEDULE_VERSION 16
+#define MAX_TASKS_PER_SCHEDULE 32
+
+/* Schedule Descriptor */
+typedef struct {
+    char schedule_name[MAX_SCHEDULE_NAME];
+    char schedule_version[MAX_SCHEDULE_VERSION];
+    task_t tasks[MAX_TASKS_PER_SCHEDULE];
+    int num_tasks;
+} schedule_t;
+
+int init_schedule(schedule_t* sched, const char* name, const char* version); 
+int add_task_to_schedule(schedule_t* sched, task_t task);
+
+#endif // SCHEDULE_H
+
+--- END FILE: services/execution-manager/include/schedule.h ---
+
+--- START FILE: services/execution-manager/include/execution_manager.h ---
+#ifndef EXECUTION_MANAGER_H
+#define EXECUTION_MANAGER_H
+
+#include <string.h>
+#include "logger.h"
+#include "task_ipc.h"
+#include "schedule.h"
+
+
+#define MAX_EXEXECUTION_MANAGER_NAME 64
+#define DEFAULT_EXECUTION_MANAGER_NAME "execution-manager"
+
+/* Execution Manager Descriptor */
+typedef struct {
+    /* Static configuration */
+    char execution_manager_name[MAX_EXEXECUTION_MANAGER_NAME];
+    char rx_queue_name[MAX_QUEUE_NAME];     // Listening queue (EM Queue)
+
+    /* Runtime state */
+    schedule_t schedule;                                            // Current schedule
+    char tx_queues_name[MAX_TASKS_PER_SCHEDULE][MAX_QUEUE_NAME];    // Sending queues (Tasks Queues)
+    mqd_t rx_fd;                                                    // Input queue descriptor
+    mqd_t tx_fd[MAX_TASKS_PER_SCHEDULE];                            // Output queues descriptors  
+
+} execution_manager_t;
+
+
+int init_execution_manager(execution_manager_t* svc, const char* name, const char* rx_q);
+int set_execution_manager_schedule(execution_manager_t* svc, schedule_t* schedule);
+int delete_execution_manager_schedule(execution_manager_t* svc);
+void close_execution_manager(execution_manager_t* svc);
+
+
+#endif // EXECUTION_MANAGER_H
+
+--- END FILE: services/execution-manager/include/execution_manager.h ---
+
+--- START FILE: services/execution-manager/src/redis_reader.c ---
+#include "redis_reader.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+/* ---------- Redis ---------- */
+
+redisContext* redis_connect(const char *host, int port)
+{
+    redisContext *ctx = redisConnect(host, port);
+    if (!ctx || ctx->err) {
+        fprintf(stderr, "Redis connection error\n");
+        exit(1);
+    }
+    return ctx;
+}
+
+int redis_wait_for_schedule(redisContext *ctx)
+{
+    while (1) {
+        redisReply *r = redisCommand(ctx, "EXISTS schedule");
+        if (r && r->integer == 1) {
+            freeReplyObject(r);
+            return 0;
+        }
+        if (r) freeReplyObject(r);
+        sleep(1);
+    }
+}
+
+/* ---------- Helpers ---------- */
+
+static const char* hget(redisReply *r, const char *key)
+{
+    for (size_t i = 0; i < r->elements; i += 2) {
+        if (strcmp(r->element[i]->str, key) == 0)
+            return r->element[i + 1]->str;
+    }
+    return NULL;
+}
+
+/* ---------- Main Reader ---------- */
+
+int redis_read_schedule(redisContext *ctx, schedule_t *sched)
+{
+    redisReply *r = redisCommand(ctx, "HGETALL schedule");
+    if (!r || r->type != REDIS_REPLY_ARRAY) return -1;
+
+    const char *v;
+
+    if ((v = hget(r, "name")))
+        strncpy(sched->name, v, sizeof(sched->name));
+
+    if ((v = hget(r, "version")))
+        strncpy(sched->version, v, sizeof(sched->version));
+
+    if ((v = hget(r, "description")))
+        strncpy(sched->description, v, sizeof(sched->description));
+
+    if ((v = hget(r, "length")))
+        sched->num_tasks = atoi(v);
+
+    freeReplyObject(r);
+
+    /* ---------- Tasks ---------- */
+
+    for (int i = 0; i < sched->num_tasks; i++) {
+        char key[32];
+        snprintf(key, sizeof(key), "scheduletask:%d", i + 1);
+
+        r = redisCommand(ctx, "HGETALL %s", key);
+        if (!r || r->type != REDIS_REPLY_ARRAY) continue;
+
+        rtask_t *task = &sched->tasks[i];
+
+        if ((v = hget(r, "name")))
+            strncpy(task->name, v, sizeof(task->name));
+
+        if ((v = hget(r, "policy")))
+            strncpy(task->policy, v, sizeof(task->policy));
+
+        if ((v = hget(r, "priority")))
+            task->priority = atoi(v);
+
+        if ((v = hget(r, "inputs")))
+            strncpy(task->inputs, v, sizeof(task->inputs));
+
+        if ((v = hget(r, "outputs")))
+            strncpy(task->outputs, v, sizeof(task->outputs));
+
+        freeReplyObject(r);
+    }
+
+    return 0;
+}
+
+--- END FILE: services/execution-manager/src/redis_reader.c ---
+
+--- START FILE: services/execution-manager/src/schedule.c ---
+#include "schedule.h"
+
+/**
+ * Initializes a schedule structure.
+ */
+int init_schedule(schedule_t* sched, const char* name, const char* version)
+{
+    /* Validate input pointer */
+    if (!sched) return -1;
+
+    /* Initialize schedule identification fields */
+    strncpy(sched->schedule_name, name, MAX_SCHEDULE_NAME);
+    strncpy(sched->schedule_version, version, MAX_SCHEDULE_VERSION);
+
+    /* Initialize internal state */
+    sched->num_tasks = 0;
+
+    return 0; /* Initialization successful */
+}
+
+
+/**
+ * Adds a task to an existing schedule.
+ */
+int add_task_to_schedule(schedule_t* sched, task_t task)
+{
+    /* Validate input pointer */
+    if (!sched) return -1;
+
+    /* Check capacity limit */
+    if (sched->num_tasks >= MAX_TASKS_PER_SCHEDULE)
+        return -1;
+
+    /* Add task to the schedule */
+    sched->tasks[sched->num_tasks++] = task;
+
+    return 0; /* Task successfully added */
+}
+
+
+--- END FILE: services/execution-manager/src/schedule.c ---
+
+--- START FILE: services/execution-manager/src/execution_manager.c ---
+#include "execution_manager.h"
+
+int init_execution_manager(execution_manager_t* svc, const char* name, const char* rx_q){
+    if (!svc) return -1;
+
+    /* Initialize context strings */
+    strncpy(svc->execution_manager_name, name, MAX_TASK_NAME);
+    strncpy(svc->rx_queue_name, rx_q, MAX_QUEUE_NAME);
+
+    /* Setup RX Queue (Service Input) */
+    /* Destroy the queue if it was left over from a previous crash. This ensures we start with an empty queue. */
+    destroy_queue(svc->rx_queue_name);
+    svc->rx_fd = create_queue(svc->rx_queue_name, O_RDONLY);
+    
+    log_message(LOG_INFO, svc->execution_manager_name , "RX Queue initialized: %s\n", svc->rx_queue_name);
+    
+    return 0;
+}
+
+
+/**
+ * Assigns a schedule to the execution manager and initializes TX queues for all tasks.
+ */
+int set_execution_manager_schedule(execution_manager_t* svc, schedule_t* schedule)
+{
+    /* Validate input pointers */
+    if (!svc || !schedule) 
+        return -1;
+
+    /* Copy the schedule into the execution manager context */
+    svc->schedule = *schedule;
+
+    /* Initialize TX queues for each task in the schedule */
+    for (int i = 0; i < schedule->num_tasks; i++) {
+
+        /* Set the queue name for this task */
+        snprintf(svc->tx_queues_name[i], MAX_QUEUE_NAME, "/%s", schedule->tasks[i].task_name);
+
+        /* Poll until the TX queue for this task is available */
+        while (1) {
+            svc->tx_fd[i] = open_queue(svc->tx_queues_name[i], O_WRONLY);
+
+            /* Case A: Queue successfully opened */
+            if (svc->tx_fd[i] != (mqd_t)-1) {
+                log_message(LOG_INFO, svc->execution_manager_name, 
+                            "TX Queue initialized: %s\n", svc->tx_queues_name[i]);
+                break; /* Exit polling loop */
+            }
+
+            /* Case B: Queue not created yet, wait and retry */
+            if (errno == ENOENT) {
+                sleep(1);
+            } 
+            /* Case C: Critical failure (permissions, limits, etc.) */
+            else {
+                perror("Fatal error connecting to Execution Manager");
+                return -1;
+            }
+        }
+    }
+
+    return 0; /* All TX queues successfully initialized */
+}
+
+
+/**
+ * Deletes all task queues assigned to the execution manager.
+ */
+int delete_execution_manager_schedule(execution_manager_t* svc)
+{
+    /* Validate input pointer */
+    if (!svc) 
+        return -1;
+
+    /* Clean up all TX queues */
+    for (int i = 0; i < svc->schedule.num_tasks; i++) {
+        close_queue(svc->tx_fd[i]);
+        destroy_queue(svc->tx_queues_name[i]);
+    }
+
+    return 0; /* All TX queues successfully deleted */
+}
+
+
+/**
+ * Closes the execution manager's RX queue and logs shutdown.
+ * Does NOT delete any TX queues or schedules.
+ */
+void close_execution_manager(execution_manager_t* svc)
+{
+    if (svc) {
+        log_message(LOG_INFO, svc->execution_manager_name, "Shutting down...\n");
+        delete_execution_manager_schedule(svc);
+        close_queue(svc->rx_fd);
+    }
+}
+
+--- END FILE: services/execution-manager/src/execution_manager.c ---
+
+--- START FILE: services/execution-manager/src/main.c ---
+#include <stdbool.h>
+#include "logger.h"
+#include "execution_manager.h"
+#include "task.h"
+#include "schedule.h"
+#include "task_ipc.h"
+
+int main(int argc, char *argv[]){
+
+    /* Execution Manager Initializzaztion */
+    int exit_code = 0;
+
+    execution_manager_t em;
+    if (init_execution_manager(&em, DEFAULT_EXECUTION_MANAGER_NAME, DEFAULT_EM_QUEUE) != 0){
+        exit_code = -1;
+        log_message(LOG_ERROR, em.execution_manager_name, "Failed to initialize Execution Manager\n");
+        goto cleanup_em;
+    }
+
+    /* Prepera datas */
+    schedule_t sched;
+
+
+    /* Wait for New Schedule */
+    bool new_schedule = true;
+
+    /* Start Execution Managment */
+    ipc_msg_t in_msg, out_msg;
+    while(1){
+
+
+        /* Compare Schedule Version */
+
+        
+        if(new_schedule){
+            /* Set new schedule */
+
+            if (init_schedule(&sched, "Schedule", "0.1") != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to initialize Schedule\n");
+                goto cleanup;
+            }
+
+            task_t task_1;
+            if (init_task(&task_1,"sum", SCHED_POLICY_FIFO, 3, "{\"a\": 10, \"b\": 12}", "{\"result\": 0}") != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to initialize Task\n");
+                goto cleanup;
+            }
+
+            if(add_task_to_schedule(&sched, task_1) != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to add Task to Schedule\n");
+                goto cleanup;
+            }
+
+            task_t task_2;
+            if (init_task(&task_2,"multiply", SCHED_POLICY_FIFO, 2, "{\"a\": 10, \"b\": 2}", "{\"result\": 0}") != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to add Task to Schedule\n");
+                goto cleanup;
+            }
+
+            if(add_task_to_schedule(&sched, task_2) != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to add Task to Schedule\n");
+                goto cleanup;
+            }
+
+            task_t task_3;
+            if (init_task(&task_3,"divide", SCHED_POLICY_FIFO, 1, "{\"a\": 10, \"b\": 5}", "{\"result\": 0}") != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to add Task to Schedule\n");
+                goto cleanup;
+            }
+
+            if(add_task_to_schedule(&sched, task_3) != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to add Task to Schedule\n");
+                goto cleanup;
+            }
+
+
+            if (set_execution_manager_schedule(&em, &sched) != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to set Execution Manager Schedule\n");
+                goto cleanup;
+            }
+
+
+            
+            new_schedule = false;
+        }
+
+        /* Run The Schedule */
+        for(int i = 0; i < em.schedule.num_tasks; i++){
+
+            /* Craft the message REQUEST */
+            out_msg =  (ipc_msg_t){0};
+            out_msg.type = MSG_TASK_REQUEST;
+            out_msg.data.task = em.schedule.tasks[i];
+
+            /* Send the message REQUEST */
+            log_message(LOG_INFO, em.execution_manager_name, "Sending Task Request to %s\n",em.schedule.tasks[i].task_name);
+            if(send_message(em.tx_fd[i], &out_msg) != 0){
+                exit_code = -1;
+                log_message(LOG_ERROR, em.execution_manager_name, "Failed to send message to task queue\n");
+                goto cleanup;
+            }
+
+            /* Receive the ACK {OK, ERROR} */
+            bool ack_ok = false;
+            while(!ack_ok){
+                if (receive_message(em.rx_fd, &in_msg) > 0){
+                    if (in_msg.type == MSG_TASK_ACK){
+                        switch(in_msg.data.ack){
+                            case ACK_OK:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Task ACK with OK\n");
+                                ack_ok = true;
+                                break;    
+                            case ACK_ERROR:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Task ACK with ERROR\n");
+                                break;
+                            default:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Unknown Task ACK\n");
+                        }
+                    } else {
+                        log_message(LOG_WARN, em.execution_manager_name, "Received unknown message type %d", in_msg.type);
+                    }
+                    
+            
+                }
+            }
+
+            /* Receive the Task REsult  */
+            bool result_received= false;
+            while(!result_received){
+                /* Craft GET STATUS message */
+                out_msg =  (ipc_msg_t){0};
+                out_msg.type = MSG_GET_STATUS;
+
+                /* Send GET STATUS message */
+                log_message(LOG_INFO, em.execution_manager_name, "Sending Status Request to %s\n",em.schedule.tasks[i].task_name);
+                if(send_message(em.tx_fd[i], &out_msg) != 0){
+                    exit_code = -1;
+                    log_message(LOG_ERROR, em.execution_manager_name, "Failed to send message to task queue\n");
+                    goto cleanup;
+                }
+
+                /* Receive Task Status */
+                if (receive_message(em.rx_fd, &in_msg) > 0){
+                    if (in_msg.type == MSG_TASK_STATUS){
+                        switch(in_msg.data.status){
+                            
+                            case IDLE:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Task Status IDLE\n");
+                                result_received = true;
+                                break;
+
+                            case RUNNING:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Task Status RUNNING\n");
+                                break;
+
+                            case COMPLETED:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Task Status COMPLETED\n");
+
+                                /* Craft GET RESULTS message */
+                                out_msg =  (ipc_msg_t){0};
+                                out_msg.type = MSG_GET_RESULTS;
+
+                                /* Send GET RESULTS message */
+                                log_message(LOG_INFO, em.execution_manager_name, "Sending Results Request to %s\n",em.schedule.tasks[i].task_name);
+                                if(send_message(em.tx_fd[i], &out_msg) !=  0){
+                                    exit_code = -1;
+                                    log_message(LOG_ERROR, em.execution_manager_name, "Failed to send message to task queue\n");
+                                    goto cleanup;  
+                                }
+
+                                /* Receive Task Results */
+                                if (receive_message(em.rx_fd, &in_msg) > 0){
+                                    if (in_msg.type == MSG_TASK_RESULT){
+                                        log_message(LOG_INFO, em.execution_manager_name, "Received Task Results: %s\n", in_msg.data.result);
+                                    }else{
+                                        log_message(LOG_INFO, em.execution_manager_name, "Received Unknown Task Results\n");
+                                    }
+
+                                }
+                                result_received = true;
+                                break;                            
+                            default:
+                                log_message(LOG_INFO, em.execution_manager_name, "Received Unknown Task Status\n");
+                        
+                        }
+                    } else {
+                        log_message(LOG_WARN, em.execution_manager_name, "Received unknown message type %d", in_msg.type);
+                    }
+                }
+
+                
+            }
+                    
+
+
+
+
+        }
+
+        sleep(1);
+        
+    }
+
+cleanup:
+cleanup_em:
+    close_execution_manager(&em);
+
+exit_program:
+    return exit_code;
+
+}
+--- END FILE: services/execution-manager/src/main.c ---
+
+--- START FILE: services/task-service/CMakeLists.txt ---
+cmake_minimum_required(VERSION 3.20)
+project(task_service C)
+
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2")
+
+add_compile_definitions(_GNU_SOURCE)
+
+# Include directories
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# Add executable
+add_executable(task-service
+    src/main.c
+    src/logger.c  # directly add logger.c to build
+    src/task_ipc.c
+    src/task_service.c
+    src/task.c
+)
+
+# Threads
+find_package(Threads REQUIRED)
+target_link_libraries(task-service PRIVATE Threads::Threads)
+
+
+
+--- END FILE: services/task-service/CMakeLists.txt ---
+
+--- START FILE: services/task-service/Dockerfile ---
+FROM ubuntu:24.04
+
+# Install build tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake  &&\
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy task-service source
+
+COPY services/task-service/ ./task-service/
+COPY common/include/ ./task-service/include/
+COPY common/src/ ./task-service/src/
+
+
+
+
+WORKDIR /app/task-service
+
+# Configure and build
+RUN cmake -S . -B build
+RUN cmake --build build
+
+#ENV TASK_NAME=sum
+#ENV TASK_QUEUE_NAME=sum
+
+ENTRYPOINT ["./build/task-service"]
+
+--- END FILE: services/task-service/Dockerfile ---
+
+--- START FILE: services/task-service/include/task_service.h ---
+#ifndef TASK_SERVICE_H
+#define TASK_SERVICE_H
+
+#include <stdint.h>
+#include <unistd.h>       /* For sleep() */
+#include <errno.h>        /* For errno, ENOENT */
+#include <stdio.h>
+#include <string.h>
+
+#include "task.h"
+#include "logger.h"
+#include "task_ipc.h"
+
+#define DEFAULT_TASK_NAME "task-service"
+
+
+
+/* Task descriptor */
+typedef struct {
+    /* Static configuration */
+    char task_name[MAX_TASK_NAME];
+    char rx_queue_name[MAX_QUEUE_NAME];     // Listening queue (Task Queue)
+    char tx_queue_name[MAX_QUEUE_NAME];     // Response queue (EM Queue) 
+
+    /* Runtime state */
+    mqd_t rx_fd;                            // Input queue descriptor
+    mqd_t tx_fd;                            // Output queue descriptor
+
+} task_service_t;
+
+
+
+int init_task_service(task_service_t* svc, const char* name, const char* rx_q, const char* tx_q);
+void run_task_service(task_service_t* svc);
+void close_task_service(task_service_t* svc);
+
+
+
+#endif /* TASK_SERVICE_H */
+
+--- END FILE: services/task-service/include/task_service.h ---
+
+--- START FILE: services/task-service/include/task_entry.h ---
+#ifndef TASK_ENTRY_H
+#define TASK_ENTRY_H
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>     /* Required for atoi */
+#include <pthread.h>    /* Required for pthread_mutex_t */
+#include "jsmn.h"
+#include "task_ipc.h"   /* Required for task_service_state_t (IDLE, RUNNING, COMPLETED) */
+
+/* --- Data Structures --- */
+
+typedef struct {
+    int a;
+    int b;
+} input_t;
+
+typedef struct {
+    int result;
+} output_t;
+
+/* * Shared Context Structure.
+ * This resides in the heap and is accessed by both Main and Thread.
+ */
+typedef struct {
+    pthread_mutex_t lock;           // Protects access to status and output
+    task_service_state_t status;    // Current state (IDLE, RUNNING, COMPLETED)
+    input_t input;                  // Input data (Read-only for the thread)
+    output_t output;                // Output data (Written by the thread)
+} task_context_t;
+
+
+
+/* --- Helper Function --- */
+
+/*
+ * Compares a JSMN token with a C string.
+ * It handles both standard JSON strings (JSMN_STRING) 
+ * and unquoted keys (JSMN_PRIMITIVE) if strict mode is off.
+ */
+static int json_eq(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING || tok->type == JSMN_PRIMITIVE) {
+        if ((int)strlen(s) == tok->end - tok->start &&
+            strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* --- Task Functions --- */
+
+/* * Input Conversion: JSON String -> Struct 
+ */
+int convert_input(char* input_json, input_t* input){
+    
+    /* Prepare parser and token array */
+    jsmn_parser p;
+    jsmntok_t t[128];   // We expect no more than 128 JSON tokens
+    
+    jsmn_init(&p);
+    
+    /* Parsing execution */
+    int r = jsmn_parse(&p, input_json, strlen(input_json), t, 128); 
+
+    if (r < 0) {
+        // Handle error codes if necessary
+        return -1;
+    }
+
+    /* Scanning the results */
+    /* Assume the top-level element is an object */
+    if (r < 1 || t[0].type != JSMN_OBJECT) {
+        return -1;
+    }
+
+    /* Loop through tokens (skipping the root object at index 0) */
+    for (int i = 1; i < r; i++) {
+        
+        /* Check for key "a" */
+        if (json_eq(input_json, &t[i], "a")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            // Safety check for buffer size
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            // Copy value to buffer to null-terminate it for atoi
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->a = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+        /* Check for key "b" */
+        else if (json_eq(input_json, &t[i], "b")) {
+            char buf[32];
+            int len = t[i+1].end - t[i+1].start;
+            
+            if (len >= (int)sizeof(buf)) len = (int)sizeof(buf) - 1;
+            
+            memcpy(buf, input_json + t[i+1].start, len);
+            buf[len] = '\0';
+            
+            input->b = atoi(buf);
+            
+            i++; // Skip the value token
+        }
+    }
+    
+    return 0;
+}
+
+/* * Output Conversion: Struct -> JSON String
+ */
+int convert_output(output_t* output, char* output_json) {
+    /* Note: Ensure 'output_json' buffer is large enough in the caller */
+    return sprintf(output_json, "{\"result\": %d}", output->result);
+}
+
+
+/* * MAIN TASK (Worker Thread)
+ * Receives the Context pointer, performs calculations, and writes the result.
+ */
+void *task_main(void *arg){
+    task_context_t *ctx = (task_context_t *)arg;
+
+    /* 1. Update state to RUNNING */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->status = RUNNING; 
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Processing: %d + %d\n", ctx->input.a, ctx->input.b);
+
+    /* 2. Real-Time Logic (Calculations) */
+    /* * Accessing ctx->input is thread-safe here because 
+     * the Main thread does not modify it after creation.
+     */
+    int res = ctx->input.a / ctx->input.b;
+
+    // Simulate heavy workload if needed
+    // usleep(1000); 
+
+    /* 3. Write Output protected by Mutex */
+    pthread_mutex_lock(&ctx->lock);
+    ctx->output.result = res;
+    ctx->status = COMPLETED;
+    pthread_mutex_unlock(&ctx->lock);
+
+    printf("[THREAD] Job Done. Result: %d\n", res);
+
+    return NULL;
+}
+
+#endif
+--- END FILE: services/task-service/include/task_entry.h ---
+
+--- START FILE: services/task-service/src/main.c ---
+#define _GNU_SOURCE
+#include <limits.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <unistd.h>
+
+#include "task.h"
+#include "task_ipc.h"
+#include "task_service.h"
+#include "logger.h"
+#include "task_entry.h"
+
+
+
+/* * Global pointer to the current task context.
+ * We use this to maintain state between different IPC messages.
+ */
+static task_context_t * task_context = NULL;
+
+
+int main(int argc, char *argv[]){
+    (void)argc;
+    (void)argv;
+    /* Task Service Initialization */
+    int exit_code = 0;
+    
+
+    /* Memory Locking: Essential for Real-Time determinism */
+    if(mlockall(MCL_CURRENT|MCL_FUTURE) == -1) {
+        perror("mlockall failed");
+        exit_code = -1;
+        goto exit_program;
+    }
+
+    /* Set Task and Queues Names */
+    const char* env_task_name = getenv("TASK_NAME");
+    char task_name[MAX_TASK_NAME];
+    snprintf(task_name, MAX_TASK_NAME, "%s", env_task_name != NULL ? env_task_name : DEFAULT_TASK_NAME);
+
+    const char* env_task_queue_name = getenv("TASK_QUEUE_NAME");
+    char task_queue_name[MAX_QUEUE_NAME];
+    snprintf(task_queue_name, MAX_QUEUE_NAME, "/%s", env_task_queue_name != NULL ? env_task_queue_name : DEFAULT_TASK_QUEUE);
+
+    log_message(LOG_INFO, task_name, "Starting Task Service...\n");
+
+
+    task_service_t svc;
+    if (init_task_service(&svc, task_name, task_queue_name, DEFAULT_EM_QUEUE) != 0){
+        exit_code = -1;
+        log_message(LOG_ERROR, svc.task_name, "Failed to initialize Task Service\n");
+        goto cleanup_task_service;
+    }
+
+    task_context = (task_context_t *)malloc(sizeof(task_context_t));
+    if (!task_context){
+        exit_code = -1;
+        log_message(LOG_ERROR, svc.task_name, "Failed to allocate task context\n");
+        goto cleanup_task_service;
+    }
+
+    memset(task_context, 0, sizeof(task_context_t));
+    pthread_mutex_init(&task_context->lock, NULL);
+    task_context->status = IDLE;
+
+
+    ipc_msg_t in_msg, out_msg;
+
+
+    /* Main loop: Task Service waits for commands and manages them */
+    while(1){
+        if(receive_message(svc.rx_fd, &in_msg) > 0){
+            switch(in_msg.type){
+
+                /* --- HANDLE NEW TASK REQUEST --- */
+                case MSG_TASK_REQUEST:
+                    log_message(LOG_INFO, svc.task_name, "Received Task Request\n");
+                    if(task_context->status != IDLE){
+                        log_message(LOG_INFO, svc.task_name, "Cannot recive request, not IDLE state");
+                        
+                        /* Send Error ACK */
+                        out_msg.type = MSG_TASK_ACK;
+                        out_msg.data.ack = ACK_ERROR;
+                        send_message(svc.tx_fd, &out_msg);
+                        continue;
+                    }
+
+                    /* Task Logic */
+                    /* Parse Inputs */
+                    log_message(LOG_INFO, svc.task_name, "Received JSON: %s\n", in_msg.data.task.input);
+                    if (convert_input(in_msg.data.task.input, &task_context->input) != 0) {
+                        log_message(LOG_ERROR, svc.task_name, "Error parsing input JSON\n");
+                        
+                        /* Send Error ACK */
+                        out_msg.type = MSG_TASK_ACK;
+                        out_msg.data.ack = ACK_ERROR;
+                        send_message(svc.tx_fd, &out_msg);
+                        continue;
+                    }
+
+                    /* Prepare Thread Attributes */
+                    pthread_attr_t attr;
+                    struct sched_param param;
+                    pthread_t thread;
+                    int ret;
+
+                    pthread_attr_init(&attr);
+
+                    /* Set Stack Size (Avoid page faults) */
+                    pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + 0x4000);
+
+                    /* CPU Affinity */
+                    cpu_set_t cpuset;
+                    CPU_ZERO(&cpuset);
+                    CPU_SET(2, &cpuset);
+                    ret = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
+                    if (ret != 0) {
+                        log_message(LOG_WARN, svc.task_name, "Affinity failed: %s\n", strerror(ret));
+                    } 
+
+
+                    /* Set Scheduling Policy */
+                    int policy = SCHED_OTHER; // Default
+                    if (in_msg.data.task.policy == SCHED_POLICY_FIFO)    policy = SCHED_FIFO;
+                    else if (in_msg.data.task.policy == SCHED_POLICY_RR) policy = SCHED_RR;
+                    
+                    if (pthread_attr_setschedpolicy(&attr, policy) != 0) {
+                        log_message(LOG_WARN, svc.task_name, "Failed to set policy (Need root?)\n");
+
+                        /* Send Error ACK */
+                        out_msg.type = MSG_TASK_ACK;
+                        out_msg.data.ack = ACK_ERROR;
+                        send_message(svc.tx_fd, &out_msg);
+                        continue;
+                    }
+                    
+                    /* Set Priority */
+                    param.sched_priority = in_msg.data.task.priority;
+                    pthread_attr_setschedparam(&attr, &param);
+
+                    /* Inherit Scheduler */
+                    pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+
+                    /* Create Thread */
+                    ret = pthread_create(&thread, &attr, task_main, task_context);
+                    if (ret != 0) {
+                        log_message(LOG_WARN, svc.task_name, "Failed to create thread: %s\n", strerror(ret));
+                        
+                        /* Send Error ACK */
+                        out_msg.type = MSG_TASK_ACK;
+                        out_msg.data.ack = ACK_ERROR;
+                        send_message(svc.tx_fd, &out_msg);
+                        continue;
+                        
+                    }
+
+                    pthread_detach(thread);
+                    pthread_attr_destroy(&attr);
+
+                    /* Send ACK */
+                    out_msg.type = MSG_TASK_ACK;
+                    out_msg.data.ack = ACK_OK;
+                    if (send_message(svc.tx_fd, &out_msg) != 0) {
+                        log_message(LOG_ERROR, svc.task_name, "Failed to send ACK: %s\n", strerror(errno));
+                    }
+                    break;
+
+
+                /* --- HANDLE STATUS REQUEST --- */
+                case MSG_GET_STATUS:
+                    log_message(LOG_INFO, svc.task_name, "Received Status Request\n");
+
+                    /* Status Logic */
+                    out_msg.type = MSG_TASK_STATUS;
+
+                    pthread_mutex_lock(&task_context->lock);
+                    out_msg.data.status = task_context->status;
+                    pthread_mutex_unlock(&task_context->lock);
+                    
+                    send_message(svc.tx_fd, &out_msg);
+
+                    break;
+
+                /* --- HANDLE RESULTS REQUEST --- */
+                case MSG_GET_RESULTS:
+                    log_message(LOG_INFO, svc.task_name, "Received Results Request\n");
+                    
+                    /* Results Logic */
+                    out_msg.type = MSG_TASK_RESULT;
+
+                    pthread_mutex_lock(&task_context->lock);
+                    convert_output(&task_context->output, out_msg.data.result);
+                    task_context->status = IDLE;
+                    pthread_mutex_unlock(&task_context->lock);
+                    
+                    send_message(svc.tx_fd, &out_msg);
+                    break;
+                    
+                default:
+                    log_message(LOG_WARN, svc.task_name, "Received unknown message type %d", in_msg.type);
+
+            }
+        }
+    }
+
+    
+cleanup_task_service:
+    close_task_service(&svc);
+
+exit_program:
+    return exit_code;
+}
+
+--- END FILE: services/task-service/src/main.c ---
+
+--- START FILE: services/task-service/src/task_service.c ---
+#include "task_service.h"
+
+
+
+/**
+ * Initializes the task service context and queues.
+ * 1. Sets up the service name and queue names.
+ * 2. Creates/Resets the RX queue (Input).
+ * 3. Polls/Waits for the TX queue (Output/Manager) to become available.
+ */
+int init_task_service(task_service_t* svc, const char* name, const char* rx_q, const char* tx_q) {
+    if (!svc) return -1;
+
+    /* Initialize context strings and state */
+    snprintf(svc->task_name, MAX_TASK_NAME, "%s", name);
+    snprintf(svc->rx_queue_name, MAX_QUEUE_NAME, "%s", rx_q);
+    snprintf(svc->tx_queue_name, MAX_QUEUE_NAME, "%s", tx_q);
+
+    /* Setup RX Queue (Service Input) */
+    /* Destroy the queue if it was left over from a previous crash. This ensures we start with an empty queue. */
+    destroy_queue(svc->rx_queue_name);
+    svc->rx_fd = create_queue(svc->rx_queue_name, O_RDONLY); 
+
+    log_message(LOG_INFO, svc->task_name , "RX Queue initialized: %s\n", svc->rx_queue_name);
+
+
+    /* Setup TX Queue (Connection to Execution Manager) */
+    /* Polling Loop: Wait until the Manager creates its queue */
+    while (1) {
+        /* Attempt to open the queue using the new helper (No O_CREAT) */
+        svc->tx_fd = open_queue(svc->tx_queue_name, O_WRONLY);
+
+        /* Case A: Success - Connection established */
+        if (svc->tx_fd != (mqd_t)-1) {
+            log_message(LOG_INFO, svc->task_name , "TX Queue initialized: %s\n", svc->tx_queue_name);
+            break; /* Exit the loop */
+        }
+
+        /* Case B: Queue not found yet (Manager is not ready) */
+        if (errno == ENOENT) {
+            /* Wait 1 second before retrying */
+            sleep(1); 
+        } 
+        /* Case C: Critical failure (Permission denied, limit reached, etc.) */
+        else {
+            perror("Fatal error connecting to Execution Manager");
+            return -1; /* Return failure code */
+        }
+    }
+
+    return 0; /* Initialization successful */
+}
+
+
+
+/**
+ * Cleanups resources.
+ */
+void close_task_service(task_service_t* svc) {
+    if (svc) {
+        log_message(LOG_INFO, svc->task_name , "Shutting down...\n");
+        close_queue(svc->rx_fd);
+        close_queue(svc->tx_fd);
+        destroy_queue(svc->rx_queue_name);
+    }
+}
+--- END FILE: services/task-service/src/task_service.c ---
+
+--- START FILE: services/deploy-manager/Dockerfile ---
+# Single-stage Dockerfile for deploy-manager
+
+FROM python:3.14-slim
+
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Working directory
+WORKDIR /app
+
+# Runtime dependencies (Git needed by GitPython)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy source code
+COPY services/deploy-manager/pyproject.toml .
+COPY services/deploy-manager/src/ ./src/
+COPY services/task-service/ ./task-service/
+COPY common/include/ task-service/include/
+COPY common/src/ task-service/src/
+
+
+# Install deploy-manager and its dependencies
+RUN pip install --no-cache-dir .
+
+# Entrypoint
+ENTRYPOINT ["python", "-m", "src.main"]
+--- END FILE: services/deploy-manager/Dockerfile ---
+
+--- START FILE: services/deploy-manager/pyproject.toml ---
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deploy-manager"
+version = "0.0.0" 
+description = "Deploy Manager for Real-Time Microservices"
+requires-python = "==3.14.*"
+
+dependencies = [
+    "GitPython==3.1.46",
+    "PyYAML==6.0.3",
+    "docker==7.1.0",
+    "redis==7.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+--- END FILE: services/deploy-manager/pyproject.toml ---
+
+--- START FILE: services/deploy-manager/src/__init__.py ---
+# deploy_manager/__init__.py
+__author__ = "Georgi Dimitrov"
+
+--- END FILE: services/deploy-manager/src/__init__.py ---
+
+--- START FILE: services/deploy-manager/src/logger.py ---
+
+import logging
+import sys
+
+def get_logger(name="deploy-manager"):
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    return logger
+
+--- END FILE: services/deploy-manager/src/logger.py ---
+
+--- START FILE: services/deploy-manager/src/exceptions.py ---
+
+class DeployManagerError(Exception):
+    """Base exception for Deploy Manager errors."""
+    pass
+
+--- END FILE: services/deploy-manager/src/exceptions.py ---
+
+--- START FILE: services/deploy-manager/src/main.py ---
+from pathlib import Path
+from .logger import get_logger
+from .manifest.manifest_fetcher import ManifestFetcher
+from .manifest.parser import ManifestParser
+from .deploy.materializer import TaskArtifactMaterializer
+from .deploy.builder import DockerImageBuilder
+from .deploy.runner import DockerContainerRunner
+from .database.redis_loader import RedisLoader  # NEW
+from .exceptions import DeployManagerError
+import sys
+
+logger = get_logger(__name__)
+
+def main():
+    repo_url = "https://github.com/GeoDimi99/RT-Task-Spec.git"
+    mission_path = Path("/tmp/rt-mission-spec")
+
+    task_service_path = Path("/app/task-service")
+    task_service_include = task_service_path / "include"
+
+    fetcher = ManifestFetcher(repo_url, mission_path)
+    docker_runner = DockerContainerRunner()
+    redis_loader = RedisLoader(host="redis", port=6379)  # NEW
+
+    try:
+        # Fetch mission repository
+        fetcher.fetch()
+
+        # Parse manifest
+        parser = ManifestParser(str(mission_path / "task_manifest.yaml"))
+        schedule = parser.parse()
+
+        
+
+        # Run containers for each task
+        for task in schedule.tasks:
+            logger.info(f"Processing task '{task.name}'")
+
+
+
+            # Run container
+            container_name = f"task-service-{task.name}"
+            docker_runner.run_task_service(
+                image_tag=task.name,
+                container_name=container_name,
+            )
+        
+        # Load schedule and tasks into Redis
+        redis_loader.load_schedule(schedule)
+        redis_loader.debug_print()  # REMOVE AFTER DEBUGGING
+        logger.info("Schedule data loaded into Redis successfully.")
+        
+
+    except DeployManagerError as e:
+        logger.error(f"Deploy Manager failed: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+--- END FILE: services/deploy-manager/src/main.py ---
+
+--- START FILE: services/deploy-manager/src/database/__init__.py ---
+
+--- END FILE: services/deploy-manager/src/database/__init__.py ---
+
+--- START FILE: services/deploy-manager/src/database/redis_loader.py ---
+# src/deploy/redis_loader.py
+import redis
+import json
+from ..logger import get_logger
+from ..domain.schedule import Schedule
+
+logger = get_logger(__name__)
+
+class RedisLoader:
+    """
+    Loads schedule/task data into Redis for debugging purposes.
+    """
+
+    def __init__(self, host="localhost", port=6379, db=0):
+        self.client = redis.Redis(host=host, port=port, db=db, decode_responses=True)
+
+    def load_schedule(self, schedule: Schedule):
+        """
+        Push schedule and tasks into Redis.
+        """
+        self.client.hset("schedule", mapping={
+            "name": schedule.name,
+            "version": schedule.version,
+            "description": schedule.description,
+            "length": str(len(schedule.tasks))
+        })
+
+        for i, task in enumerate(schedule.tasks, start=1):
+            task_key = f"scheduletask:{i}"
+            self.client.hset(task_key, mapping={
+                "name": task.name,
+                "policy": task.policy,
+                "priority": str(task.priority),
+                "depends_on": json.dumps(task.depends_on),
+                "inputs": json.dumps(task.inputs),
+                "outputs": json.dumps(task.outputs),
+            })
+
+
+        logger.info(f"Loaded {len(schedule.tasks)} tasks into Redis.")
+
+    def debug_print(self):
+        """
+        Read back all schedule/task data and print for debugging.
+        """
+        schedule_data = self.client.hgetall("schedule")
+        print("=== SCHEDULE ===")
+        for k, v in schedule_data.items():
+            print(f"{k}: {v}")
+
+        print("\n=== TASKS ===")
+        length = int(schedule_data.get("length", 0))
+        for i in range(1, length + 1):
+            task_key = f"scheduletask:{i}"
+            task_data = self.client.hgetall(task_key)
+            print(f"{task_key}: {task_data}")
+
+--- END FILE: services/deploy-manager/src/database/redis_loader.py ---
+
+--- START FILE: services/deploy-manager/src/deploy/runner.py ---
+import docker
+from ..logger import get_logger
+from ..exceptions import DeployManagerError
+
+logger = get_logger(__name__)
+
+class DockerContainerRunner:
+    """
+    Runs Docker containers for task services with the required real-time privileges.
+    """
+
+    def __init__(self):
+        self.client = docker.from_env()
+
+    def run_task_service(
+        self,
+        image_tag: str,
+        container_name: str = "task-service",
+        detach: bool = True,
+    ):
+        """
+        Run a task-service container with privileged capabilities and ulimits.
+        """
+
+        try:
+            # Remove existing container if it exists
+            try:
+                existing = self.client.containers.get(container_name)
+                logger.info(f"Stopping and removing existing container '{container_name}'")
+                existing.stop()
+                existing.remove()
+            except docker.errors.NotFound:
+                pass  # Container does not exist, OK
+
+            logger.info(f"Running container '{container_name}' from image '{image_tag}'")
+
+            container = self.client.containers.run(
+                image=image_tag,
+                name=container_name,
+                detach=detach,
+                tty=True,
+                ipc_mode="host",
+                cap_add=["SYS_NICE"],
+                environment={
+                    "TASK_NAME": image_tag,
+                    "TASK_QUEUE_NAME": image_tag,
+                    },
+                ulimits=[
+                    docker.types.Ulimit(name="rtprio", soft=99, hard=99),
+                    docker.types.Ulimit(name="memlock", soft=-1, hard=-1),
+                ],
+                cpuset_cpus="1",
+                #remove=True,
+            )
+
+            logger.info(f"Container '{container_name}' is running (ID: {container.short_id})")
+            return container
+
+        except docker.errors.DockerException as e:
+            raise DeployManagerError(f"Failed to run container '{container_name}': {e}")
+
+--- END FILE: services/deploy-manager/src/deploy/runner.py ---
+
+--- START FILE: services/deploy-manager/src/deploy/__init__.py ---
+
+--- END FILE: services/deploy-manager/src/deploy/__init__.py ---
+
+--- START FILE: services/deploy-manager/src/manifest/manifest_fetcher.py ---
+# src/manifest/manifest_fetcher.py
+from pathlib import Path
+from git import Repo, GitCommandError
+from ..logger import get_logger
+from ..exceptions import DeployManagerError
+
+logger = get_logger(__name__)
+
+class ManifestFetcher:
+
+    def __init__(self, url: str, local_path: Path):
+        self.url = url
+        self.local_path = local_path
+
+    def fetch(self) -> None:
+        """
+        Clone the repository if it doesn't exist, otherwise pull the latest changes.
+        """
+        try:
+            if self.local_path.exists():
+                logger.info(f"Repository exists at {self.local_path}, pulling latest changes...")
+                repo = Repo(self.local_path)
+                origin = repo.remotes.origin
+                origin.pull()
+                logger.info("Repository updated successfully.")
+            else:
+                logger.info(f"Cloning repository from {self.url} to {self.local_path}...")
+                Repo.clone_from(self.url, self.local_path)
+                logger.info("Repository cloned successfully.")
+
+        except GitCommandError as e:
+            raise DeployManagerError(f"Git error: {e}")
+
+--- END FILE: services/deploy-manager/src/manifest/manifest_fetcher.py ---
+
+--- START FILE: services/deploy-manager/src/manifest/__init__.py ---
+
+--- END FILE: services/deploy-manager/src/manifest/__init__.py ---
+
+--- START FILE: services/deploy-manager/src/manifest/parser.py ---
+# src/manifest/parser.py
+from typing import List
+import yaml
+from ..exceptions import DeployManagerError
+from ..logger import get_logger
+from ..domain.task import Task
+from ..domain.schedule import Schedule
+
+logger = get_logger(__name__)
+
+class ManifestParser:
+    # Only fifo and rr for now
+    VALID_POLICIES = {"fifo", "rr", "other"}
+
+    def __init__(self, manifest_path: str):
+        self.manifest_path = manifest_path
+
+    def parse(self) -> Schedule:
+        """
+        Parse a YAML manifest file and return a Schedule object composed of Task objects.
+        """
+        try:
+            with open(self.manifest_path, "r") as f:
+                data = yaml.safe_load(f)
+        except FileNotFoundError:
+            raise DeployManagerError(f"Manifest file not found: {self.manifest_path}")
+        except yaml.YAMLError as e:
+            raise DeployManagerError(f"Error parsing YAML manifest: {e}")
+
+        # Validate top-level fields
+        if "schedule" not in data:
+            raise DeployManagerError("Manifest missing required field: 'schedule'")
+
+        schedule_data = data["schedule"]
+        tasks_data = schedule_data.get("tasks", [])
+
+        # Parse tasks into domain Task objects
+        tasks: List[Task] = []
+        for t in tasks_data:
+            try:
+                task = Task(
+                    name=t["name"],
+                    policy=t["policy"].lower(),
+                    priority=int(t["priority"]),
+
+                    inputs=t.get("inputs", {}),
+
+                )
+            except KeyError as e:
+                raise DeployManagerError(f"Task missing required field: {e}")
+
+            # Validate policy
+            if task.policy not in self.VALID_POLICIES:
+                raise DeployManagerError(f"Invalid policy '{task.policy}' in task {task.id}")
+
+            tasks.append(task)
+
+        # Build Schedule domain object
+        schedule = Schedule(
+            name=schedule_data.get("name", "unnamed"),
+            version=schedule_data.get("version", "0.0.0"),
+            description=schedule_data.get("description", ""),
+            tasks=tasks
+        )
+
+        logger.info(f"Parsed schedule '{schedule.name}' with {len(tasks)} tasks.")
+        return schedule
+
+--- END FILE: services/deploy-manager/src/manifest/parser.py ---
+
+--- START FILE: services/deploy-manager/src/domain/task.py ---
+# domain/task.py
+from dataclasses import dataclass, field
+from typing import Dict, List, Any
+
+@dataclass
+class Task:
+    name: str
+    policy: str
+    priority: int
+    depends_on: List[str] = field(default_factory=list)
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    outputs: Dict[str, Any] = field(default_factory=dict)
+
+--- END FILE: services/deploy-manager/src/domain/task.py ---
+
+--- START FILE: services/deploy-manager/src/domain/__init__.py ---
+
+--- END FILE: services/deploy-manager/src/domain/__init__.py ---
+
+--- START FILE: services/deploy-manager/src/domain/schedule.py ---
+# src/domain/schedule.py
+from dataclasses import dataclass
+from typing import List
+from .task import Task  # import from domain
+
+@dataclass
+class Schedule:
+    name: str
+    version: str
+    description: str
+    tasks: List[Task]
+
+--- END FILE: services/deploy-manager/src/domain/schedule.py ---
