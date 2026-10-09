@@ -56,7 +56,7 @@ Follow this instruction to start the system in a manual way step by step:
 
 ```bash
 # 1. Build the task-wrapper base image (Ubuntu + glib + json-glib + hiredis + sources)
-docker build -t jeffadac/task-wrapper:latest \
+docker build -t rtmf/task-wrapper:choreography-mqueue \
     -f services/task-wrapper/Dockerfile .
 
 # 2. Build all per-task images from the manifest
@@ -104,7 +104,7 @@ A manifest has two top-level sections:
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:choreography-mqueue"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"
@@ -238,7 +238,7 @@ cd choreography-mqueue
 | Stale messages between runs cause weird hangs | POSIX message queues persist in the kernel until reboot or manual delete | `sudo rm -f /dev/mqueue/*` before each run (the script does this for you). |
 | `Permission denied` on `/var/run/docker.sock` | User not in `docker` group | `sudo usermod -aG docker $USER` and re-login. |
 | Port `6379` already in use | A local Redis is already running | `sudo systemctl stop redis` (or change the compose port). |
-| `cmake: not found` while the image-builder is building a task | Base image was rebuilt without the build toolchain | Force a clean rebuild: `docker rmi jeffadac/task-wrapper:latest && docker build --no-cache -t jeffadac/task-wrapper:latest -f services/task-wrapper/Dockerfile .` |
+| `cmake: not found` while the image-builder is building a task | Base image was rebuilt without the build toolchain | Force a clean rebuild: `docker rmi rtmf/task-wrapper:choreography-mqueue && docker build --no-cache -t rtmf/task-wrapper:choreography-mqueue -f services/task-wrapper/Dockerfile .` |
 
 ---
 

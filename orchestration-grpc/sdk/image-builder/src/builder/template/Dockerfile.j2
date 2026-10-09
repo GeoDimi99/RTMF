@@ -2,6 +2,7 @@ FROM ${base_image}
 
 # Inject user-defined logic
 COPY ${source_dir}/app_task.h /app/task-wrapper/include/app_task.h
+COPY ${source_dir}/app_task.c /app/task-wrapper/src/app_task.c
 
 WORKDIR /app/task-wrapper
 

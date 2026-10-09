@@ -37,7 +37,7 @@ def wait_for_grpc_ready(host, port, timeout=30, retry_interval=0.5):
 
 def main():
     # Use local manifest instead of cloning from GitHub
-    manifest_path = Path("/app/task/manifest.yaml")
+    manifest_path = Path("/app/tests/test_0_code/manifest.yaml")
 
     task_service_path = Path("/app/task-wrapper")
     task_service_include = task_service_path / "include"

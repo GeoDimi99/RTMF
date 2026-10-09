@@ -80,7 +80,7 @@ done
 # The base image must match `images.base` in the manifest, otherwise the task
 # images are built on top of a stale (or missing) task-wrapper image.
 BASE_IMAGE=$(sed -nE 's/^[[:space:]]*base:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$MANIFEST_PATH" | head -n1)
-BASE_IMAGE="${BASE_IMAGE:-jeffadac/task-wrapper:latest}"
+BASE_IMAGE="${BASE_IMAGE:-rtmf/task-wrapper:orchestration-mqueue}"
 docker build -t "$BASE_IMAGE" -f services/task-wrapper/Dockerfile .
 python3 sdk/image-builder/src/main.py -f "$MANIFEST_PATH" -c "$CONTEXT"
 

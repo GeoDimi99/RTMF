@@ -47,4 +47,4 @@ execution_manager_*.log
 execution_manager_*.csv
 
 # --- Local manifest backups ---
-task/manifest.yaml.backup
+tests/test_0_code/manifest.yaml.backup

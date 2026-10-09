@@ -71,7 +71,7 @@ for img in $TASK_NAMES; do
 done
 
 # --- Build one Docker image per task using the task-wrapper Dockerfile ----
-docker build -t jeffadac/task-wrapper:latest -f services/task-wrapper/Dockerfile .
+docker build -t rtmf/task-wrapper:choreography-mqueue -f services/task-wrapper/Dockerfile .
 python3 sdk/image-builder/src/main.py -f "$MANIFEST_PATH" -c "$CONTEXT"
 
 # --- Build infrastructure services (deploy-manager, etc.) -----------------

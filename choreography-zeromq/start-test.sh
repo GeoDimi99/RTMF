@@ -62,7 +62,7 @@ docker volume rm zmq_ipc 2>/dev/null || true
 docker volume create zmq_ipc >/dev/null
 
 echo "=== [2/6] Rebuild task-wrapper base image ==="
-docker build -t jeffadac/task-wrapper:latest \
+docker build -t rtmf/task-wrapper:choreography-zeromq \
     -f services/task-wrapper/Dockerfile .
 
 echo "=== [3/6] Build per-task images (SDK) ==="

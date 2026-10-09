@@ -51,7 +51,7 @@ Follow this instruction to start the system in a manual way step by step:
 
 ```bash
 # 1. Build the task-wrapper base image
-docker build -t jeffadac/task-wrapper:latest \
+docker build -t rtmf/task-wrapper:choreography-zeromq \
     -f services/task-wrapper/Dockerfile .
 
 # 2. Build all per-task images from the manifest
@@ -95,7 +95,7 @@ A manifest has two top-level sections:
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:choreography-zeromq"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"

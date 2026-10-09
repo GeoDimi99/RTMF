@@ -13,8 +13,9 @@ add_compile_definitions(_GNU_SOURCE)
 # Find pkg-config
 find_package(PkgConfig REQUIRED)
 
-# Find GLib and hiredis
+# Find GLib, json-glib and hiredis
 pkg_check_modules(GLIB2 REQUIRED IMPORTED_TARGET glib-2.0)
+pkg_check_modules(JSON_GLIB REQUIRED IMPORTED_TARGET json-glib-1.0)
 pkg_check_modules(HIREDIS REQUIRED IMPORTED_TARGET hiredis)
 
 # Find gRPC and Protobuf
@@ -29,12 +30,14 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/proto
     ${GLIB2_INCLUDE_DIRS}
+    ${JSON_GLIB_INCLUDE_DIRS}
     ${HIREDIS_INCLUDE_DIRS}
 )
 
 # Add gRPC server executable
 add_executable(task-wrapper
     src/grpc_server.cpp
+    src/app_task.c
     proto/proto/task_service.pb.cc
     proto/proto/task_service.grpc.pb.cc
     src/logger.c
@@ -49,10 +52,12 @@ target_link_libraries(task-wrapper
     PRIVATE 
     Threads::Threads
     PkgConfig::GLIB2
+    PkgConfig::JSON_GLIB
     PkgConfig::HIREDIS
     protobuf::libprotobuf
     gRPC::grpc++
     gRPC::grpc++_reflection
+    m
 )
 
 

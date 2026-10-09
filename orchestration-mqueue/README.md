@@ -55,7 +55,7 @@ Follow these instructions to start the system step-by-step:
 
 ```bash
 # 1. Build the task-wrapper base image
-docker build -t jeffadac/task-wrapper:latest \
+docker build -t rtmf/task-wrapper:orchestration-mqueue \
     -f services/task-wrapper/Dockerfile .
 
 # 2. Build all per-task images from the manifest
@@ -98,7 +98,7 @@ A manifest has two top-level sections:
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:orchestration-mqueue"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"

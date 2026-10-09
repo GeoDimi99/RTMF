@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <cstring>
 #include <pthread.h>
 #include <sched.h>
 #include <limits.h>
@@ -11,6 +12,11 @@
 #include <sys/resource.h>    // setpriority() for the nice value
 #include <grpcpp/grpcpp.h>
 #include "proto/task_service.grpc.pb.h"
+
+// GLib/json-glib are C++-aware: include them outside extern "C" so that their
+// C++-only parts (templates) keep C++ linkage. app_task.h re-includes them as no-ops.
+#include <glib.h>
+#include <json-glib/json-glib.h>
 
 // Include C headers
 extern "C" {
@@ -32,12 +38,13 @@ using taskservice::TaskResponse;
 // (Generic wrapper in grpc_server.cpp, like task_wrapper.c in MQ version)
 // ============================================
 
-// Wraps the real task_context_t with the performance timestamps/core_id
+// Carries the task input/output together with the performance timestamps/core_id
 // captured from inside the task thread itself (for measuring performance).
 // Allocated on the caller's stack: the caller always pthread_join()s before
 // reading these fields, so there is no lifetime issue.
 typedef struct {
-    task_context_t* ctx;
+    input_t* input;          // Task input (read-only for the task thread)
+    output_t* output;        // Task output, heap-allocated by task_main() (g_free by the caller)
     long end_time_request;   // Thread start timestamp (ns) - beginning of task thread execution
     long start_time_result;  // Thread end timestamp (ns) - end of task thread execution
     int  core_id;            // CPU core the task thread actually ran on
@@ -78,7 +85,7 @@ extern "C" {
         }
 
         /* Execute the actual task (task-specific code) */
-        task_main(pctx->ctx);
+        pctx->output = (output_t*) task_main(pctx->input);
 
         /* Measure the end of the task thread execution (for the performance) */
         clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -113,6 +120,28 @@ static int policy_from_string(const std::string& policy_str) {
     return SCHED_OTHER;
 }
 
+// Parses the flat JSON object sent by the execution-manager (e.g.
+// {"total_ops": 16, "io_percentage": 0}) into input_t through the task's
+// convert_json_to_input(), the same API used by the message queue versions.
+static int parse_task_input(const std::string& inputs_json, input_t* input) {
+    JsonParser* parser = json_parser_new();
+    int ret = -1;
+
+    if (json_parser_load_from_data(parser, inputs_json.c_str(), -1, NULL)) {
+        JsonNode* root = json_parser_get_root(parser);
+        if (root && JSON_NODE_HOLDS_OBJECT(root)) {
+            ret = convert_json_to_input(json_node_get_object(root), input);
+        } else {
+            log_message(LOG_ERROR, "task-wrapper", "Task inputs are not a JSON object: %s", inputs_json.c_str());
+        }
+    } else {
+        log_message(LOG_ERROR, "task-wrapper", "Invalid JSON in task inputs: %s", inputs_json.c_str());
+    }
+
+    g_object_unref(parser);
+    return ret;
+}
+
 // Implementation of TaskExecutor service
 class TaskExecutorServiceImpl final : public TaskExecutor::Service {
     Status ExecuteTask(ServerContext* context, 
@@ -121,25 +150,13 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         
         log_message(LOG_INFO, "task-wrapper", "Received task: %s (ID: %u)",
                request->task_name().c_str(), request->task_id());
-        
-        // Allocate task context
-        task_context_t* ctx = (task_context_t*)malloc(sizeof(task_context_t));
-        if (!ctx) {
-            response->set_status("ERROR");
-            response->set_error_message("Memory allocation failed");
-            return Status::OK;
-        }
-        
-        pthread_mutex_init(&ctx->lock, NULL);
-        ctx->status = IDLE;
-        
+
         // Convert JSON input to input_t structure
-        std::string inputs_json = request->inputs_json();
-        if (convert_input((char*)inputs_json.c_str(), &ctx->input) != 0) {
+        input_t input;
+        memset(&input, 0, sizeof(input));
+        if (parse_task_input(request->inputs_json(), &input) != 0) {
             response->set_status("ERROR");
             response->set_error_message("Failed to parse inputs");
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
         
@@ -180,13 +197,11 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
 
         // Create real-time thread (using generic wrapper that pins CPU affinity)
-        perf_thread_ctx_t pctx = { ctx, 0, 0, 0, request->has_cpu_affinity() ? request->cpu_affinity() : -1, policy, request->priority() };
+        perf_thread_ctx_t pctx = { &input, NULL, 0, 0, 0, request->has_cpu_affinity() ? request->cpu_affinity() : -1, policy, request->priority() };
         if (pthread_create(&task_thread, &attr, task_main_wrapper, &pctx) != 0) {
             response->set_status("ERROR");
             response->set_error_message("Failed to create task thread");
             pthread_attr_destroy(&attr);
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
 
@@ -198,12 +213,11 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         log_message(LOG_INFO, "task-wrapper", "Task completed");
 
         // Convert output to JSON
-        char result_json[MAX_TASK_JSON_OUT];
-        if (convert_output(&ctx->output, result_json) < 0) {
+        gchar* result_json = pctx.output ? convert_output_to_json(pctx.output) : NULL;
+        g_free(pctx.output);
+        if (!result_json) {
             response->set_status("ERROR");
             response->set_error_message("Failed to serialize output");
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
 
@@ -221,8 +235,7 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         log_message(LOG_DEBUG, "task-wrapper", "Result: %s", result_json);
 
         // Cleanup
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
+        g_free(result_json);
 
         return Status::OK;
     }
@@ -235,30 +248,15 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         log_message(LOG_INFO, "task-wrapper", "Async request received for task: %s (ID: %u)",
                request->task_name().c_str(), request->task_id());
         
-        // Allocate task context
-        task_context_t* ctx = (task_context_t*)malloc(sizeof(task_context_t));
-        if (!ctx) {
-            TaskResponse error_response;
-            error_response.set_task_id(request->task_id());
-            error_response.set_status("ERROR");
-            error_response.set_error_message("Memory allocation failed");
-            writer->Write(error_response);
-            return Status::OK;
-        }
-        
-        pthread_mutex_init(&ctx->lock, NULL);
-        ctx->status = IDLE;
-        
         // Convert JSON input to input_t structure
-        std::string inputs_json = request->inputs_json();
-        if (convert_input((char*)inputs_json.c_str(), &ctx->input) != 0) {
+        input_t input;
+        memset(&input, 0, sizeof(input));
+        if (parse_task_input(request->inputs_json(), &input) != 0) {
             TaskResponse error_response;
             error_response.set_task_id(request->task_id());
             error_response.set_status("ERROR");
             error_response.set_error_message("Failed to parse inputs");
             writer->Write(error_response);
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
         
@@ -330,7 +328,7 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
  }
         
         // Create thread with RT attributes (or fallback to default if RT failed)
-        perf_thread_ctx_t pctx = { ctx, 0, 0, 0, request->has_cpu_affinity() ? request->cpu_affinity() : -1, policy, priority_val };
+        perf_thread_ctx_t pctx = { &input, NULL, 0, 0, 0, request->has_cpu_affinity() ? request->cpu_affinity() : -1, policy, priority_val };
         int ret = pthread_create(&task_thread, &attr, task_main_wrapper, &pctx);
         pthread_attr_destroy(&attr);
 
@@ -347,8 +345,6 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
             error_response.set_status("ERROR");
             error_response.set_error_message("Failed to create task thread");
             writer->Write(error_response);
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
         
@@ -364,21 +360,19 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         
         // If task was cancelled, cleanup and return
         if (task_cancelled) {
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
+            g_free(pctx.output);
             return Status::OK;
         }
-        
+
         // Convert output to JSON
-        char result_json[MAX_TASK_JSON_OUT];
-        if (convert_output(&ctx->output, result_json) < 0) {
+        gchar* result_json = pctx.output ? convert_output_to_json(pctx.output) : NULL;
+        g_free(pctx.output);
+        if (!result_json) {
             TaskResponse error_response;
             error_response.set_task_id(request->task_id());
             error_response.set_status("ERROR");
             error_response.set_error_message("Failed to serialize output");
             writer->Write(error_response);
-            pthread_mutex_destroy(&ctx->lock);
-            free(ctx);
             return Status::OK;
         }
         
@@ -397,10 +391,9 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         writer->Write(result_response);
 
         log_message(LOG_DEBUG, "task-wrapper", "Async result sent: %s", result_json);
-        
+
         // Cleanup
-        pthread_mutex_destroy(&ctx->lock);
-        free(ctx);
+        g_free(result_json);
         
         return Status::OK;
     }

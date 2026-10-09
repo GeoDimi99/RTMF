@@ -6,6 +6,7 @@ RUN apt-get update && \
         build-essential \
         cmake \
         libglib2.0-dev \
+        libjson-glib-dev \
         libhiredis-dev \
         libgrpc++-dev \
         libprotobuf-dev \

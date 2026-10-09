@@ -22,7 +22,7 @@ COPY common/include/ task-wrapper/include/
 COPY common/src/ task-wrapper/src/
 
 # Copy task manifest
-COPY task/ ./task/
+COPY tests/test_0_code/ ./tests/test_0_code/
 
 
 # Install deploy-manager and its dependencies

@@ -20,8 +20,8 @@
 #               random results/test_<id>/ directory is created.
 #
 # Environment:
-#   MANIFEST    manifest to run (default: task/manifest.yaml; a custom one is
-#               copied over task/manifest.yaml)
+#   MANIFEST    manifest to run (default: tests/test_0_code/manifest.yaml; a custom one is
+#               copied over tests/test_0_code/manifest.yaml)
 #   FORCE=1     overwrite results/<test-name>/ if it already exists
 #
 
@@ -39,7 +39,7 @@ TOTAL=9
 step() { echo -e "\n${GREEN}▶ [$1/$TOTAL] $2${NC}\n"; }
 fail() { echo -e "\n${RED}✖ Error at step $1: $2${NC}\n" >&2; exit 1; }
 
-MANIFEST_FILE="task/manifest.yaml"
+MANIFEST_FILE="tests/test_0_code/manifest.yaml"
 SOURCE_MANIFEST="${MANIFEST:-$MANIFEST_FILE}"
 
 rl_init_results "$SCRIPT_DIR" "${1:-}"
@@ -68,13 +68,13 @@ fi
 
 # 1 — Build task-wrapper base image
 step 1 "docker build task-wrapper"
-docker build --no-cache -t jeffadac/realtime-microservices:task-wrapper \
+docker build --no-cache -t rtmf/task-wrapper:orchestration-grpc \
   -f services/task-wrapper/Dockerfile . \
   || fail 1 "docker build task-wrapper"
 
 # 2 — Build per-task images via SDK image-builder
 step 2 "python3 image-builder (task manifest)"
-python3 sdk/image-builder/src/main.py -f "$MANIFEST_FILE" -c task --no-cache \
+python3 sdk/image-builder/src/main.py -f "$MANIFEST_FILE" -c tests/test_0_code --no-cache \
   || fail 2 "python3 image-builder"
 
 # 3 — Build deploy-manager
