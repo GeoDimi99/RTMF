@@ -189,6 +189,19 @@ void em_wait_for_schedule(execution_manager_t *em){
     }
 }
 
+gint em_read_iterations(execution_manager_t *em) {
+    // Number of schedule repetitions ('schedule.iterations' in the manifest)
+    redisReply *r = redisCommand(em->redis_client, "HGET schedule iterations");
+    gint iterations = (r && r->type == REDIS_REPLY_STRING) ? atoi(r->str) : 0;
+    if (r) freeReplyObject(r);
+
+    if (iterations < 1) {
+        log_message(LOG_WARN, "execution-manager", "Missing or invalid schedule iterations, running the schedule once.");
+        iterations = 1;
+    }
+    return iterations;
+}
+
 schedule_t* em_read_schedule(execution_manager_t *em) {
     // 1. Fetch main schedule metadata from Redis hash "schedule"
     redisReply *r = redisCommand(em->redis_client, "HGETALL schedule");

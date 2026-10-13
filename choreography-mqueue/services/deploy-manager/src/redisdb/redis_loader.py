@@ -45,7 +45,8 @@ class RedisLoader:
             "schedule:length": str(len(unique_images)),
             "schedule:duration": str(max_deadline),
             "schedule:images": json.dumps(unique_images),
-            "schedule:leader": leader_image
+            "schedule:leader": leader_image,
+            "schedule:iterations": str(schedule.iterations)
         }
 
         # 3. Add image-specific task data

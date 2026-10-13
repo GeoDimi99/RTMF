@@ -1,7 +1,7 @@
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:orchestration-mqueue"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"
@@ -16,7 +16,7 @@ images:
       src: "stress_task_5"
     - alias: "stress_task_6"
       src: "stress_task_6"
-   
+
 schedule:
   name: "Configurable CPU/IO Benchmark"
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
@@ -29,7 +29,7 @@ schedule:
       start: 50
       deadline: 650
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 50
       depends_on: []
       inputs:
@@ -48,7 +48,7 @@ schedule:
       start: 300
       deadline: 1300
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 50
       depends_on: []
       inputs:
@@ -68,7 +68,7 @@ schedule:
       start: 350
       deadline: 950
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 70
       depends_on: []
       inputs:
@@ -87,7 +87,7 @@ schedule:
       start: 370
       deadline: 970
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 60
       depends_on: []
       inputs:
@@ -107,7 +107,7 @@ schedule:
       start: 600
       deadline: 1200
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 60
       depends_on: []
       inputs:
@@ -128,7 +128,7 @@ schedule:
       start: 650
       deadline: 1250
       cpu_affinity: 5
-      policy: fifo
+      policy: "fifo"
       priority: 60
       depends_on: []
       inputs:

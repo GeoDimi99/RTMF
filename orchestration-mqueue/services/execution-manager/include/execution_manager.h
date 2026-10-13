@@ -75,6 +75,7 @@ void em_free(execution_manager_t *em);
 void em_run_schedule(execution_manager_t *em, schedule_t *sched);
 void em_wait_for_schedule(execution_manager_t *em);
 schedule_t * em_read_schedule(execution_manager_t *em);
+gint em_read_iterations(execution_manager_t *em);
 
 
 

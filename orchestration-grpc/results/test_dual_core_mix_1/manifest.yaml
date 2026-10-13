@@ -1,7 +1,7 @@
 version: "1.0"
 
 images:
-  base: "jeffadac/realtime-microservices:task-wrapper"
+  base: "rtmf/task-wrapper:orchestration-grpc"
   repo: "jeffadac/realtime-microservices"
   tasks:
     - alias: "stress_task_1"
@@ -16,14 +16,14 @@ images:
       src: "stress_task_5"
     - alias: "stress_task_6"
       src: "stress_task_6"
-   
+
 schedule:
   name: "Configurable CPU/IO Benchmark"
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
   iterations: 100
   
   tasks:
-    # Pure CPU workload
+    # ===================== CORE 5 =====================
     - id: 1
       image: "stress_task_1"
       start: 50
@@ -35,10 +35,10 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
@@ -54,14 +54,13 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
-
 
     - id: 3
       image: "stress_task_3"
@@ -74,10 +73,10 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
@@ -93,14 +92,13 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
-
 
     - id: 5
       image: "stress_task_5"
@@ -113,15 +111,13 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
-
-
 
     - id: 6
       image: "stress_task_6"
@@ -134,14 +130,13 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 17
+          value: 16
         io_percentage:
           type: int
-          value: 0      
+          value: 0
       outputs:
         result:
           type: int
-
 
     # ===================== CORE 4 =====================
     - id: 7

@@ -1,7 +1,7 @@
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:choreography-zeromq"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"
@@ -16,7 +16,7 @@ images:
       src: "stress_task_5"
     - alias: "stress_task_6"
       src: "stress_task_6"
-   
+
 schedule:
   name: "Configurable CPU/IO Benchmark"
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
@@ -35,7 +35,7 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
@@ -54,7 +54,7 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
@@ -74,7 +74,7 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
@@ -93,7 +93,7 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
@@ -113,7 +113,7 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
@@ -134,11 +134,10 @@ schedule:
       inputs:
         total_ops:
           type: int
-          value: 16
+          value: 17
         io_percentage:
           type: int
           value: 0      
       outputs:
         result:
           type: int
-

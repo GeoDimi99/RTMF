@@ -278,6 +278,19 @@ void em_wait_for_schedule(execution_manager_t *em) {
 
 
 
+gint em_read_iterations(execution_manager_t *em) {
+    // Number of schedule repetitions ('schedule.iterations' in the manifest)
+    redisReply *r = redisCommand(em->redis_client, "HGET schedule_data schedule:iterations");
+    gint iterations = (r && r->type == REDIS_REPLY_STRING) ? atoi(r->str) : 0;
+    if (r) freeReplyObject(r);
+
+    if (iterations < 1) {
+        log_message(LOG_WARN, "execution-manager", "Missing or invalid schedule iterations, running the schedule once.");
+        iterations = 1;
+    }
+    return iterations;
+}
+
 schedule_t* em_read_schedule(execution_manager_t *em) {
     // 1. Fetch the entire flat hash from Redis
     redisReply *r = redisCommand(em->redis_client, "HGETALL schedule_data");
@@ -535,15 +548,20 @@ gboolean handle_initialization(gpointer user_data) {
         /* Only FIFO/RR use a static priority: OTHER/BATCH/IDLE accept only 0 (the nice value is
          * applied by the thread itself). A rejected param would make glibc copy the caller's
          * FIFO 90 priority and pthread_create would fail with EINVAL. */
+        /* RT threads are created at the minimum priority and raised to the target one right after
+         * pthread_create (see below): glibc clones the thread with this creator's FIFO 90 priority
+         * and then lowers it to the attr one, and a lowered runnable FIFO thread is queued at the
+         * HEAD of its new priority list, so it would preempt an already running task with the same
+         * priority. A raised thread is queued at the TAIL instead, as FIFO requires. */
         struct sched_param param;
         gboolean is_rt = (task->policy == SCHED_FIFO || task->policy == SCHED_RR);
-        param.sched_priority = is_rt ? task->priority : 0;
+        param.sched_priority = is_rt ? sched_get_priority_min(task->policy) : 0;
 
         pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
         pthread_attr_setschedpolicy(&attr, task->policy);
         gint param_err = pthread_attr_setschedparam(&attr, &param);
         if (param_err != 0) {
-            log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", task->priority, task->task_id, param_err, g_strerror(param_err));
+            log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", param.sched_priority, task->task_id, param_err, g_strerror(param_err));
         }
         pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
 
@@ -553,6 +571,15 @@ gboolean handle_initialization(gpointer user_data) {
         if (rc) {
             log_message(LOG_ERROR, "execution-manager", "pthread_create failed with code %d (%s) for Task ID %u", rc, g_strerror(rc), task->task_id);
             continue;
+        }
+
+        /* Raise the RT thread to its target priority: it is queued at the tail of that priority list */
+        if (is_rt) {
+            param.sched_priority = task->priority;
+            gint prio_err = pthread_setschedparam(thread, task->policy, &param);
+            if (prio_err != 0) {
+                log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", task->priority, task->task_id, prio_err, g_strerror(prio_err));
+            }
         }
         pthread_detach(thread);
 

@@ -1,7 +1,7 @@
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:orchestration-mqueue"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"
@@ -21,7 +21,7 @@ schedule:
   name: "Configurable CPU/IO Benchmark"
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
   iterations: 100
-
+  
   tasks:
     - id: 1
       image: "stress_task_1"

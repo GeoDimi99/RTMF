@@ -78,7 +78,8 @@ int main(int argc, char *argv[]) {
     /* -------------- Main Loop Execution -------------- */
     //while (keep_running) {
 
-    for(int i=0; i < 100 && keep_running; i++){     // For test
+    int num_iter = em_read_iterations(em);
+    for(int i=0; i < num_iter && keep_running; i++){
 
         iteration = i; // Counter for measure the performance
 
@@ -100,7 +101,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* Run the schedule */
-        log_message(LOG_INFO, "execution-manager", "Start iteration %d, progress percentage %d %%",i, i*100/100);
+        log_message(LOG_INFO, "execution-manager", "Start iteration %d/%d, progress percentage %d %%", i, num_iter, (i*100)/num_iter);
         em_run_schedule(em, sched);
         
 

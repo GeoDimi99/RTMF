@@ -1,7 +1,7 @@
 version: "1.0"
 
 images:
-  base: "jeffadac/task-wrapper:latest"
+  base: "rtmf/task-wrapper:choreography-zeromq"
   repo: "jeffadac/task-wrapper"
   tasks:
     - alias: "stress_task_1"
@@ -21,7 +21,7 @@ schedule:
   name: "Configurable CPU/IO Benchmark"
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
   iterations: 100
-
+  
   # Under SCHED_OTHER the static RT priority must be 0, so the "priority"
   # field here is interpreted as the nice value (-20..19, lower = higher prio).
   # Linear mapping of the RT range [1, 99] onto the nice range [19, -20]:

@@ -186,8 +186,13 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         // Set priority: only FIFO/RR use a static priority, OTHER/BATCH/IDLE accept only 0
         // (the nice value is applied by the thread itself). A rejected param would make glibc
         // copy the caller's FIFO priority and pthread_create would fail with EINVAL.
+        // RT threads are created at the minimum priority and raised to the target one right
+        // after pthread_create: glibc clones the thread with the server's FIFO 85 priority and
+        // then lowers it to the attr one, and a lowered runnable FIFO thread is queued at the
+        // HEAD of its new priority list, so it would preempt an already running task with the
+        // same priority. A raised thread is queued at the TAIL instead, as FIFO requires.
         bool is_rt = (policy == SCHED_FIFO || policy == SCHED_RR);
-        param.sched_priority = is_rt ? request->priority() : 0;
+        param.sched_priority = is_rt ? sched_get_priority_min(policy) : 0;
         int param_ret = pthread_attr_setschedparam(&attr, &param);
         if (param_ret != 0) {
             log_message(LOG_WARN, "task-wrapper", "Invalid priority %d (ret=%d)", request->priority(), param_ret);
@@ -206,6 +211,15 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         }
 
         pthread_attr_destroy(&attr);
+
+        // Raise the RT thread to its target priority: it is queued at the tail of that priority list
+        if (is_rt) {
+            param.sched_priority = request->priority();
+            int prio_ret = pthread_setschedparam(task_thread, policy, &param);
+            if (prio_ret != 0) {
+                log_message(LOG_WARN, "task-wrapper", "Invalid priority %d (ret=%d)", request->priority(), prio_ret);
+            }
+        }
 
         // Wait for task completion
         pthread_join(task_thread, NULL);
@@ -303,8 +317,10 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
                 use_rt = false;
             } else {
                 // 4. Set priority: only FIFO/RR use a static priority, OTHER/BATCH/IDLE accept
-                // only 0 (the nice value is applied by the thread itself)
-                param.sched_priority = is_rt ? priority_val : 0;
+                // only 0 (the nice value is applied by the thread itself). RT threads are created
+                // at the minimum priority and raised to priority_val right after pthread_create,
+                // so that they are queued at the tail of their priority list (see ExecuteTask)
+                param.sched_priority = is_rt ? sched_get_priority_min(policy) : 0;
                 int param_ret = pthread_attr_setschedparam(&attr, &param);
                 log_message(LOG_DEBUG, "task-wrapper", "Set priority %d: %s (ret=%d)",
                        priority_val, param_ret == 0 ? "OK" : "FAILED", param_ret);
@@ -331,6 +347,14 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         perf_thread_ctx_t pctx = { &input, NULL, 0, 0, 0, request->has_cpu_affinity() ? request->cpu_affinity() : -1, policy, priority_val };
         int ret = pthread_create(&task_thread, &attr, task_main_wrapper, &pctx);
         pthread_attr_destroy(&attr);
+
+        // Raise the RT thread to its target priority: it is queued at the tail of that priority list
+        if (ret == 0 && use_rt && is_rt) {
+            param.sched_priority = priority_val;
+            int prio_ret = pthread_setschedparam(task_thread, policy, &param);
+            log_message(LOG_DEBUG, "task-wrapper", "Raise to priority %d: %s (ret=%d)",
+                   priority_val, prio_ret == 0 ? "OK" : "FAILED", prio_ret);
+        }
 
         if (ret != 0) {
             // RT failed, try again with no attributes
