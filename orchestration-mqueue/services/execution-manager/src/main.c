@@ -18,7 +18,7 @@ static volatile gboolean keep_running = TRUE;
 /* Signal Handler for SIGINT (Ctrl+C) */
 void int_handler(int dummy) {
     (void)dummy;
-    log_message(LOG_INFO, "execution-manager", "SIGINT received.");
+    log_message(LOG_INFO, "execution-manager", "SIGINT received");
     keep_running = FALSE;
 }
 
@@ -31,7 +31,7 @@ int main(int argc, char *argv[]) {
     /* Set Core 4 */
     cpu_set_t set;
     CPU_ZERO(&set);                                     // clear cpu mask
-    CPU_SET(4, &set);             // set cpu 4
+    CPU_SET(4, &set);                                   // set cpu 4
     sched_setaffinity(0, sizeof(cpu_set_t), &set);      // 0 is the calling process
 
     /* Setting scheduler policy and priority*/
@@ -41,11 +41,10 @@ int main(int argc, char *argv[]) {
 
 
     /* ------ Init Execution Manager ------ */
-    log_message(LOG_INFO, "execution-manager", "=========== Execution Manager Init ========");
     int exit_code = 0;
     execution_manager_t *em = em_new(DEFAULT_EXECUTION_MANAGER_NAME);
     if (!em) {
-        log_message(LOG_ERROR, "execution-manager", "em_new failed.");
+        log_message(LOG_ERROR, "execution-manager", "em_new failed");
         exit(EXIT_FAILURE);
     }
     
@@ -56,10 +55,7 @@ int main(int argc, char *argv[]) {
     gboolean is_set_new_schedule = TRUE;
 
 
-    log_message(LOG_INFO, "execution-manager", "====== Execution Manager Initialized ======");
-    log_message(LOG_INFO, "execution-manager", "==== Execution Manager Start Main Loop ====");
-    log_message(LOG_INFO, "execution-manager", "Click Ctrl+C for a clean exit.");
-
+    log_message(LOG_INFO, "execution-manager", "Initialized (Click Ctrl+C for a clean exit)");
 
 
     /* -------------- Main Loop Execution -------------- */
@@ -143,13 +139,11 @@ int main(int argc, char *argv[]) {
     }
 
     
-    log_message(LOG_INFO, "execution-manager", "==== Execution Manager Exit Main Loop ====");
     log_message(LOG_INFO, "execution-manager", "Exit from the main loop. Cleanup ...");
 
     if (em) em_free(em);
     if (sched) schedule_free(sched);
 
-    log_message(LOG_INFO, "execution-manager", "Cleanup completed.");
-    log_message(LOG_INFO, "execution-manager", "==== Execution Manager Fish ====");
+    log_message(LOG_INFO, "execution-manager", "Cleanup completed");
     return exit_code;
 }

@@ -46,7 +46,6 @@ typedef struct execution_manager_t{
 typedef struct {
     gpointer data;      // GList of activation_data_t
     gint64 timestamp;   
-    gint64 scheduled_mono_us; // Planned absolute monotonic time (T-Zero + start)
     schedule_t *sched;
 } start_context_t;
 

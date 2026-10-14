@@ -1,9 +1,7 @@
 #ifndef EXECUTION_MANAGER_H
 #define EXECUTION_MANAGER_H
 
-// Must come before the first system header is pulled in (glibc latches its
-// feature-test macros on the first inclusion of <features.h>), so glibc's
-// <sched.h> (via schedule.h below) exposes SCHED_BATCH/SCHED_IDLE/SCHED_DEADLINE.
+
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

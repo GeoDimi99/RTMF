@@ -12,12 +12,7 @@
 static GMainLoop *g_main_loop = NULL;
 
 
-/**
- * @brief Signal handler for SIGINT (Ctrl+C).
- * 
- * This function is called when the user presses Ctrl+C. It gracefully
- * requests the GMainLoop to terminate, allowing for a clean shutdown.
- */
+/* Signal handler for SIGINT (Ctrl+C) */
 static void sigint_handler(int signum) {
     (void)signum; // Unused parameter
     log_message(LOG_INFO, "task-wrapper", "SIGINT received, initiating shutdown...");
@@ -38,7 +33,7 @@ int main(int argc, char *argv[]) {
      /* Set Core 4 */
     cpu_set_t set;
     CPU_ZERO(&set);                                     // clear cpu mask
-    CPU_SET(4, &set);             // set cpu 4
+    CPU_SET(4, &set);                                   // set cpu 4
     sched_setaffinity(0, sizeof(cpu_set_t), &set);      // 0 is the calling process
 
     /* Setting scheduler policy and priority*/
@@ -57,7 +52,6 @@ int main(int argc, char *argv[]) {
     
     gchar *q_path = g_strdup_printf("/%s_q", env_queue ? env_queue : DEFAULT_TASK_QUEUE);
 
-    log_message(LOG_INFO, "task-wrapper", "======== Task Wrapper Init ========");
     task_wrapper_t *tw = task_wrapper_new(
         env_task ? env_task : DEFAULT_TASK_NAME, 
         q_path, 
@@ -80,9 +74,8 @@ int main(int argc, char *argv[]) {
     // Colleghiamo la coda al loop. Passiamo 'tw' per averlo nella callback.
     g_io_add_watch(channel, G_IO_IN, (GIOFunc)handle_input_message, tw);
 
-    log_message(LOG_INFO, "task-wrapper", "=== Task Wrapper (%s) Initialized ===", tw->task_name->str);
-    log_message(LOG_INFO, "task-wrapper", "Click Ctrl+C for a clean exit.");
-    log_message(LOG_INFO, "task-wrapper", "=== Task Wrapper (%s) Start Main Loop ===", tw->task_name->str);
+    log_message(LOG_INFO, "task-wrapper", "Task Wrapper (%s) Initialized (Click Ctrl+C for a clean exit)", tw->task_name->str);
+    log_message(LOG_INFO, "task-wrapper", "Task Wrapper (%s) Start Main Loop", tw->task_name->str);
 
     log_message(LOG_INFO, "task-wrapper", "(%s): It's ready. Waiting for messages ...", tw->task_name->str);
 
@@ -90,13 +83,12 @@ int main(int argc, char *argv[]) {
     g_main_loop_run(g_main_loop);
 
     /* Cleanup */
-    log_message(LOG_INFO, "task-wrapper", "=== Task Wrapper (%s) End Main Loop ===", tw->task_name->str);
     log_message(LOG_INFO, "task-wrapper", "(%s): Main loop terminated. Cleaning up...", tw->task_name->str);
     g_io_channel_unref(channel);
     g_main_loop_unref(g_main_loop);
     task_wrapper_free(tw);
-    log_message(LOG_INFO, "task-wrapper", "Cleanup complete. Exiting.");
-    log_message(LOG_INFO, "task-wrapper", "=== Task Wrapper Finish ===");
+    log_message(LOG_INFO, "task-wrapper", "Cleanup complete. Exiting");
+    log_message(LOG_INFO, "task-wrapper", "Task Wrapper Finish");
 
     return exit_code;
 }

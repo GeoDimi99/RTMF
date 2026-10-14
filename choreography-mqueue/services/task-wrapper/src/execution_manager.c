@@ -40,7 +40,7 @@ GSList* parse_input_list(const gchar *input_data) {
     GError *error = NULL;
 
     if (!json_parser_load_from_data(parser, input_data, -1, &error)) {
-        log_message(LOG_ERROR, "execution-manager", "JSON parser: load failed: %s", error->message);
+        log_message(LOG_ERROR, "task-wrapper", "JSON parser: load failed: %s", error->message);
         g_error_free(error);
         g_object_unref(parser);
         return NULL;
@@ -48,7 +48,7 @@ GSList* parse_input_list(const gchar *input_data) {
 
     JsonNode *root = json_parser_get_root(parser);
     if (!JSON_NODE_HOLDS_ARRAY(root)) {
-        log_message(LOG_ERROR, "execution-manager", "JSON parser: root is not an array.");
+        log_message(LOG_ERROR, "task-wrapper", "JSON parser: root is not an array");
         g_object_unref(parser);
         return NULL;
     }
@@ -100,7 +100,7 @@ execution_manager_t* em_new(const gchar *name){
     };
     mqd_t qd = mq_open(q_name->str, O_RDONLY | O_CREAT | O_NONBLOCK, 0644, &attr);
     if (qd == (mqd_t)-1) {
-            log_message(LOG_ERROR, "execution-manager", "mq_open failed for %s.", q_name->str);
+            log_message(LOG_ERROR, "task-wrapper", "mq_open failed for %s", q_name->str);
             exit(EXIT_FAILURE);
     }
     em->em_queue = qd;
@@ -108,7 +108,7 @@ execution_manager_t* em_new(const gchar *name){
 
     redisContext *c = redisConnect("redis", 6379);
     if (c != NULL && c->err ){
-        log_message(LOG_ERROR, "execution-manager", "redis connect failed: %s", c->errstr);
+        log_message(LOG_ERROR, "task-wrapper", "redis connect failed: %s", c->errstr);
         exit(EXIT_FAILURE);
     }
     em->redis_client = c;
@@ -149,8 +149,8 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     gint64 time_zero_us;
 
     if (em->is_leader) {
-        /* --- LEADER LOGIC: Wait for all workers --- */
-        log_message(LOG_INFO, "execution-manager", "Leader: waiting for %d images to be READY...",
+        /* LEADER LOGIC: Wait for all workers */
+        log_message(LOG_INFO, "task-wrapper", "Leader: waiting for %d images to be READY...",
                 g_list_length(sched->schedule_images_queues));
 
         guint ready_count = 0;
@@ -161,7 +161,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
             if (mq_receive(em->em_queue, (char*)&msg, sizeof(msg), NULL) != -1) {
                 if (msg.type == MSG_TASK_READY) {
                     ready_count++;
-                    log_message(LOG_INFO, "execution-manager", "Leader: worker %d/%d is ready.", ready_count, target_count);
+                    log_message(LOG_INFO, "task-wrapper", "Leader: worker %d/%d is ready", ready_count, target_count);
                 }
             }
             g_usleep(1000); // Prevent CPU pegging
@@ -179,22 +179,22 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
 
             // Using PRIO_SYNC (20) to jump ahead of any pending task results
             if (mq_send(target_qd, (const char*)&msg, sizeof(msg), PRIO_SYNC) == -1) {
-                log_message(LOG_ERROR, "execution-manager", "Failed to send SYNC to worker: %s", g_strerror(errno));
+                log_message(LOG_ERROR, "task-wrapper", "Failed to send SYNC to worker: %s", g_strerror(errno));
             }
         }
-        log_message(LOG_INFO, "execution-manager", "Leader: barrier released. Sync time sent.");
+        log_message(LOG_INFO, "task-wrapper", "Leader: barrier released. Sync time sent");
 
     } else {
-        /* --- WORKER LOGIC: Signal ready and wait --- */
+        /* WORKER LOGIC: Signal ready and wait */
         msg.type = MSG_TASK_READY;
         msg.task_id = 0; // Identifies the container
 
-        log_message(LOG_INFO, "execution-manager", "Worker: signaling READY to leader...");
+        log_message(LOG_INFO, "task-wrapper", "Worker: signaling READY to leader...");
         /* Signaling READY with high priority */
         mq_send(sched->schedule_leader_queue, (const char*)&msg, sizeof(msg), PRIO_SYNC);
 
         /* Wait for the Leader to send the start timestamp */
-        log_message(LOG_INFO, "execution-manager", "Worker: waiting for SYNC signal from leader...");
+        log_message(LOG_INFO, "task-wrapper", "Worker: waiting for SYNC signal from leader...");
 
         while (TRUE) {
             if (mq_receive(em->em_queue, (char*)&msg, sizeof(msg), NULL) != -1) {
@@ -205,25 +205,24 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
             }
             g_usleep(1000);
         }
-        log_message(LOG_INFO, "execution-manager", "Worker: received sync time. Starting timers...");
+        log_message(LOG_INFO, "task-wrapper", "Worker: received sync time. Starting timers...");
     }
-    log_message(LOG_INFO, "execution-manager", "Final synchronization complete. T-Zero (monotonic): %ld us", (long)time_zero_us);
+    log_message(LOG_INFO, "task-wrapper", "Final synchronization complete. T-Zero (monotonic): %ld us", (long)time_zero_us);
     //return;
-    /* --- THE REST OF YOUR FUNCTION (Unchanged timers logic) --- */
+    /* THE REST OF YOUR FUNCTION (Unchanged timers logic) */
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
 
     
 
-    /* 1. Plan the scheudle DEADLINES */
+    /* Plan the scheudle DEADLINES */
     for (GList *l = sched->schedule_end_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
-        /* CORREZIONE: Uso deadline_context_t invece di context_t */
         deadline_context_t *ctx = g_new0(deadline_context_t, 1);
         ctx->data = entry->data_list;
         ctx->loop = loop;
         ctx->timestamp = entry->timestamp;
-        ctx->is_last = (l->next == NULL); // Se è l'ultimo nodo della GQueue
+        ctx->is_last = (l->next == NULL); 
         ctx->sched = sched;
 
         gint64 target_mono_us = time_zero_us + (entry->timestamp * 1000);
@@ -235,7 +234,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
         g_source_unref(source);
     }
 
-    /* 2. Plan the schedule STARTS */
+    /* Plan the schedule STARTS */
     for (GList *l = sched->schedule_start_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
@@ -255,11 +254,11 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
         g_source_unref(source);
     }
 
-    log_message(LOG_INFO, "execution-manager", "Scheduler started! Waiting for events...");
+    log_message(LOG_INFO, "task-wrapper", "Scheduler started! Waiting for events...");
     g_main_loop_run(loop);
 
     g_main_loop_unref(loop);
-    log_message(LOG_INFO, "execution-manager", "Scheduler terminated successfully.");
+    log_message(LOG_INFO, "task-wrapper", "Scheduler terminated successfully");
 }
 
 void em_wait_for_schedule(execution_manager_t *em) {
@@ -271,7 +270,7 @@ void em_wait_for_schedule(execution_manager_t *em) {
             return;
         }
         if (r) freeReplyObject(r);
-        log_message(LOG_INFO, "execution-manager", "Waiting for schedule_data in Redis...");
+        log_message(LOG_INFO, "task-wrapper", "Waiting for schedule_data in Redis...");
         sleep(1);
     }
 }
@@ -285,14 +284,14 @@ gint em_read_iterations(execution_manager_t *em) {
     if (r) freeReplyObject(r);
 
     if (iterations < 1) {
-        log_message(LOG_WARN, "execution-manager", "Missing or invalid schedule iterations, running the schedule once.");
+        log_message(LOG_WARN, "task-wrapper", "Missing or invalid schedule iterations, running the schedule once");
         iterations = 1;
     }
     return iterations;
 }
 
 schedule_t* em_read_schedule(execution_manager_t *em) {
-    // 1. Fetch the entire flat hash from Redis
+    // Fetch the entire flat hash from Redis
     redisReply *r = redisCommand(em->redis_client, "HGETALL schedule_data");
     if (!r || r->type == REDIS_REPLY_ERROR || r->elements == 0) {
         if (r) freeReplyObject(r);
@@ -308,7 +307,7 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
     // 2. Parse the list of image names
     JsonParser *parser = json_parser_new();
     if (!json_parser_load_from_data(parser, images_json, -1, NULL)) {
-        log_message(LOG_WARN, "execution-manager", "Failed to parse images JSON");
+        log_message(LOG_WARN, "task-wrapper", "Failed to parse images JSON");
         freeReplyObject(r);
         return NULL;
     }
@@ -366,27 +365,27 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
             if (json_parser_load_from_data(t_parser, task_json, -1, NULL)) {
                 JsonObject *t_obj = json_node_get_object(json_parser_get_root(t_parser));
 
-                // --- FIELD MAPPING LOGIC ---
+                // FIELD MAPPING LOGIC
 
-                // A. Numeric fields (Direct)
+                // Numeric fields (Direct)
                 guint16 t_id = (guint16)json_object_get_int_member(t_obj, "id");
                 gint64 start_time = json_object_get_int_member(t_obj, "start");
                 gint64 end_time = json_object_get_int_member(t_obj, "deadline");
 
-                // B. Stringified Numeric fields ("1", "10") -> Use atoi()
+                // Stringified Numeric fields ("1", "10") -> Use atoi()
                 const char *cpu_str = json_object_get_string_member(t_obj, "cpu_affinity");
                 const char *prio_str = json_object_get_string_member(t_obj, "priority");
                 
                 gint cpu = cpu_str ? atoi(cpu_str) : 0;
                 gint8 priority = prio_str ? (gint8)atoi(prio_str) : 0;
 
-                // C. Policy String ("other", "normal", "batch", "idle", "fifo", "rr", "deadline") -> Map to C constants
+                // Policy String ("other", "normal", "batch", "idle", "fifo", "rr", "deadline") -> Map to C constants
                 const char *policy_name = json_object_get_string_member(t_obj, "policy");
                 gint policy = SCHED_OTHER; // Default to 0
                 if (policy_name != NULL) {
                     if (g_ascii_strcasecmp(policy_name, "other") == 0 ||
                         g_ascii_strcasecmp(policy_name, "normal") == 0) {
-                        policy = SCHED_OTHER; // SCHED_NORMAL is the kernel-side alias for the same value (0)
+                        policy = SCHED_OTHER; 
                     } else if (g_ascii_strcasecmp(policy_name, "batch") == 0) {
                         policy = SCHED_BATCH;
                     } else if (g_ascii_strcasecmp(policy_name, "idle") == 0) {
@@ -396,18 +395,19 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
                     } else if (g_ascii_strcasecmp(policy_name, "rr") == 0) {
                         policy = SCHED_RR;
                     } else if (g_ascii_strcasecmp(policy_name, "deadline") == 0) {
-                        // NOTE: SCHED_DEADLINE cannot be applied via pthread_attr_setschedpolicy()
-                        // (used below); it requires the sched_setattr(2) syscall with a struct
-                        // sched_attr. Threads requesting it will currently fail at creation time.
+                        // ------------------------TODO-----------------------------------------------
+                        // WARNING: SCHED_DEADLINE cannot be applied via pthread_attr_setschedpolicy()
+                        // (used below); it requires the sched_setattr(2) syscall with a struct sched_attr.
+                        // --------------------------------------------------------------------------- 
                         policy = SCHED_DEADLINE;
                     } else {
-                        log_message(LOG_WARN, "execution-manager", "Unknown scheduler policy '%s', defaulting to SCHED_OTHER", policy_name);
+                        log_message(LOG_WARN, "task-wrapper", "Unknown scheduler policy '%s', defaulting to SCHED_OTHER", policy_name);
                     }
                 }
 
-                // D. Inputs (Read as string to prevent JSON nested-node errors)
+                // Inputs (Read as string to prevent JSON nested-node errors)
                 const char *json_input = json_object_get_string_member(t_obj, "inputs");
-                log_message(LOG_DEBUG, "execution-manager", "input: %s", json_input ? json_input : "[{}]");
+                log_message(LOG_DEBUG, "task-wrapper", "input: %s", json_input ? json_input : "[{}]");
 
                 GSList* t_input =  parse_input_list(g_strdup(json_input ? json_input : "[{}]"));
 
@@ -463,15 +463,16 @@ void* task_wrapper_func(void* data){
      * the pthread attributes, so the thread applies it to itself (nice is per-thread on Linux) */
     if ((tw_input->policy == SCHED_OTHER || tw_input->policy == SCHED_BATCH) && tw_input->priority != 0) {
         if (setpriority(PRIO_PROCESS, gettid(), tw_input->priority) == -1) {
-            log_message(LOG_WARN, "execution-manager", "Failed to set nice %d for Task ID %u: %s", tw_input->priority, task_id, g_strerror(errno));
+            log_message(LOG_WARN, "task-wrapper", "Failed to set nice %d for Task ID %u: %s", tw_input->priority, task_id, g_strerror(errno));
         }
     }
 
-    log_message(LOG_DEBUG, "execution-manager", "ThreadCall %u: start thread function.", task_id);
+    log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: start thread function", task_id);
+    
     /* Run the thread function */
     gpointer res = task_main(input);
 
-    log_message(LOG_DEBUG, "execution-manager", "ThreadCall %u: termination thread function.", task_id);
+    log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: termination thread function", task_id);
 
     /* Measure the start_time_result (for the performance) */
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -487,7 +488,7 @@ void* task_wrapper_func(void* data){
     /* -------------------------------------------------- */
 
     /* Log the performance metrics to be analysed */
-    log_perf("execution-manager", iteration, task_id, start_time_request, end_time_request, start_time_result, end_time_result, core_id);
+    log_perf("task-wrapper", iteration, task_id, start_time_request, end_time_request, start_time_result, end_time_result, core_id);
 
     /* Cleanup */
     g_free(res);
@@ -505,7 +506,7 @@ gboolean handle_initialization(gpointer user_data) {
 
 
     if (tasks == NULL) {
-        log_message(LOG_ERROR, "execution-manager", "No tasks");
+        log_message(LOG_ERROR, "task-wrapper", "No tasks");
         g_free(ctx);
         return G_SOURCE_REMOVE;
     }
@@ -541,18 +542,12 @@ gboolean handle_initialization(gpointer user_data) {
         CPU_SET(task->cpu_affinity, &set);
         gint affinity_err = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &set);
         if (affinity_err != 0) {
-            log_message(LOG_WARN, "execution-manager", "Failed to set CPU affinity for Task ID %u. Error: %d (%s)", task->task_id, affinity_err, g_strerror(affinity_err));
+            log_message(LOG_WARN, "task-wrapper", "Failed to set CPU affinity for Task ID %u. Error: %d (%s)", task->task_id, affinity_err, g_strerror(affinity_err));
         }
 
         /* Setting scheduler policy and priority */
         /* Only FIFO/RR use a static priority: OTHER/BATCH/IDLE accept only 0 (the nice value is
-         * applied by the thread itself). A rejected param would make glibc copy the caller's
-         * FIFO 90 priority and pthread_create would fail with EINVAL. */
-        /* RT threads are created at the minimum priority and raised to the target one right after
-         * pthread_create (see below): glibc clones the thread with this creator's FIFO 90 priority
-         * and then lowers it to the attr one, and a lowered runnable FIFO thread is queued at the
-         * HEAD of its new priority list, so it would preempt an already running task with the same
-         * priority. A raised thread is queued at the TAIL instead, as FIFO requires. */
+         * applied by the thread itself) */ 
         struct sched_param param;
         gboolean is_rt = (task->policy == SCHED_FIFO || task->policy == SCHED_RR);
         param.sched_priority = is_rt ? sched_get_priority_min(task->policy) : 0;
@@ -561,7 +556,7 @@ gboolean handle_initialization(gpointer user_data) {
         pthread_attr_setschedpolicy(&attr, task->policy);
         gint param_err = pthread_attr_setschedparam(&attr, &param);
         if (param_err != 0) {
-            log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", param.sched_priority, task->task_id, param_err, g_strerror(param_err));
+            log_message(LOG_WARN, "task-wrapper", "Invalid priority %d for Task ID %u. Error: %d (%s)", param.sched_priority, task->task_id, param_err, g_strerror(param_err));
         }
         pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
 
@@ -569,7 +564,7 @@ gboolean handle_initialization(gpointer user_data) {
         gint rc = pthread_create(&thread, &attr, task_wrapper_func, tw_input);
         pthread_attr_destroy(&attr); // Clean up attributes
         if (rc) {
-            log_message(LOG_ERROR, "execution-manager", "pthread_create failed with code %d (%s) for Task ID %u", rc, g_strerror(rc), task->task_id);
+            log_message(LOG_ERROR, "task-wrapper", "pthread_create failed with code %d (%s) for Task ID %u", rc, g_strerror(rc), task->task_id);
             continue;
         }
 
@@ -578,7 +573,7 @@ gboolean handle_initialization(gpointer user_data) {
             param.sched_priority = task->priority;
             gint prio_err = pthread_setschedparam(thread, task->policy, &param);
             if (prio_err != 0) {
-                log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", task->priority, task->task_id, prio_err, g_strerror(prio_err));
+                log_message(LOG_WARN, "task-wrapper", "Invalid priority %d for Task ID %u. Error: %d (%s)", task->priority, task->task_id, prio_err, g_strerror(prio_err));
             }
         }
         pthread_detach(thread);
@@ -592,10 +587,10 @@ gboolean handle_initialization(gpointer user_data) {
                 // If they are IDs stored directly in the pointer: GPOINTER_TO_UINT(dep->data)
                 g_string_append_printf(deps, "%u ", GPOINTER_TO_UINT(dep->data));
             }
-            log_message(LOG_DEBUG, "execution-manager", "%s", deps->str);
+            log_message(LOG_DEBUG, "task-wrapper", "%s", deps->str);
             g_string_free(deps, TRUE);
         } else {
-            log_message(LOG_DEBUG, "execution-manager", "Depends On: None");
+            log_message(LOG_DEBUG, "task-wrapper", "Depends On: None");
         }
     }
 
@@ -610,22 +605,22 @@ gboolean handle_expiration(gpointer user_data) {
     GSList *tasks = (GSList *)ctx->data;
 
     if (tasks == NULL) {
-        log_message(LOG_INFO, "execution-manager", "No tasks to expire");
+        log_message(LOG_INFO, "task-wrapper", "No tasks to expire");
     } else {
         for (GSList *l = tasks; l != NULL; l = l->next) {
             expiration_data_t *exp = (expiration_data_t *)l->data;
 
             /* Check if the task is jet completed*/
             if (schedule_is_task_completed(ctx->sched, exp->task_id)) {
-                log_message(LOG_INFO, "execution-manager", "Task %u already completed.", exp->task_id);
+                log_message(LOG_INFO, "task-wrapper", "Task %u already completed", exp->task_id);
                 continue;
             }
-            log_message(LOG_INFO, "execution-manager", "Sent ABORT for Task ID %u", exp->task_id);
+            log_message(LOG_INFO, "task-wrapper", "Sent ABORT for Task ID %u", exp->task_id);
         }
     }
 
     if (ctx->is_last) {
-        log_message(LOG_INFO, "execution-manager", "handle_expiration: final deadline reached. Quitting...");
+        log_message(LOG_INFO, "task-wrapper", "handle_expiration: final deadline reached. Quitting...");
         g_main_loop_quit(ctx->loop);
     }
 

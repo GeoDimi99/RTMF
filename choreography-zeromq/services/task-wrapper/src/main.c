@@ -5,6 +5,8 @@
 #include <unistd.h> // For sleep()
 #include <sched.h>
 #include <sys/mman.h>
+#include <errno.h>
+#include <string.h>
 
 #include "schedule.h"
 #include "execution_manager.h"
@@ -21,7 +23,7 @@ volatile gboolean keep_running = TRUE;
 /* Signal Handler for SIGINT (Ctrl+C) */
 void int_handler(int dummy) {
     (void)dummy;
-    log_message(LOG_INFO, "execution-manager", "SIGINT received.");
+    log_message(LOG_INFO, "task-wrapper", "SIGINT received");
     keep_running = FALSE;
 }
 
@@ -31,7 +33,7 @@ int main(int argc, char *argv[]) {
 
     /* Lock memory */
     if(mlockall(MCL_CURRENT|MCL_FUTURE) == -1) {
-        log_message(LOG_ERROR, "execution-manager", "mlockall failed: %m");
+        log_message(LOG_ERROR, "task-wrapper", "mlockall failed: %m");
         exit(EXIT_FAILURE);
     }
 
@@ -44,6 +46,13 @@ int main(int argc, char *argv[]) {
     CPU_SET(4, &set);                                   // set cpu 4
     sched_setaffinity(0, sizeof(cpu_set_t), &set);      // 0 is the calling process
 
+    /* Setting scheduler policy and priority*/
+    struct sched_param param;
+    param.sched_priority = 90;
+    if (sched_setscheduler(0, SCHED_FIFO, &param) == -1) {
+        log_message(LOG_WARN, "task-wrapper", "sched_setscheduler failed: %s. Try running with root privileges", strerror(errno));
+    }
+
     /* ------ Init Execution Manager ------ */
     int exit_code = 0;
     char *env_task = getenv("TASK_NAME");
@@ -53,13 +62,13 @@ int main(int argc, char *argv[]) {
 
     execution_manager_t *em = em_new(em_name);
     if (!em) {
-        log_message(LOG_ERROR, "execution-manager", "em_new failed.");
+        log_message(LOG_ERROR, "task-wrapper", "em_new failed");
         exit(EXIT_FAILURE);
     }
 
     schedule_t *sched = NULL; // Init to NULL
 
-    log_message(LOG_INFO, "execution-manager", "Initialized (Click Ctrl+C for a clean exit)");
+    log_message(LOG_INFO, "task-wrapper", "Initialized (Click Ctrl+C for a clean exit)");
 
     /* Control for new schedule */
     em_wait_for_schedule(em);
@@ -76,7 +85,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* Run the schedule */
-        log_message(LOG_INFO, "execution-manager", "Start iteration %d/%d, progress percentage %d%%", i, sched->schedule_iterations, (i*100)/sched->schedule_iterations);
+        log_message(LOG_INFO, "task-wrapper", "Start iteration %d/%d, progress percentage %d%%", i, sched->schedule_iterations, (i*100)/sched->schedule_iterations);
         em_run_schedule(em, sched);
         
 
@@ -90,11 +99,11 @@ int main(int argc, char *argv[]) {
         //}
     }
 
-    log_message(LOG_INFO, "execution-manager", "Exit from the main loop. Cleanup ...");
+    log_message(LOG_INFO, "task-wrapper", "Exit from the main loop. Cleanup ...");
 
     if (em) em_free(em);
     if (sched) schedule_free(sched);
 
-    log_message(LOG_INFO, "execution-manager", "Cleanup completed.");
+    log_message(LOG_INFO, "task-wrapper", "Cleanup completed");
     return exit_code;
 }

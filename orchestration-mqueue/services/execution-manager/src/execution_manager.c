@@ -16,28 +16,29 @@ const char* redis_get_hash_value(redisReply *r, const char *key) {
 }
 
 int get_sched_policy(const char *t_policy) {
-    // g_strcmp0 è sicuro anche se t_policy è NULL
     if (g_strcmp0(t_policy, "rr") == 0) {
         return SCHED_RR;
     } else if (g_strcmp0(t_policy, "fifo") == 0) {
         return SCHED_FIFO;
     } else if (g_strcmp0(t_policy, "other") == 0 || g_strcmp0(t_policy, "normal") == 0) {
-        return SCHED_OTHER; // SCHED_NORMAL è l'alias lato kernel dello stesso valore (0)
+        return SCHED_OTHER; 
     } else if (g_strcmp0(t_policy, "batch") == 0) {
         return SCHED_BATCH;
     } else if (g_strcmp0(t_policy, "idle") == 0) {
         return SCHED_IDLE;
     } else if (g_strcmp0(t_policy, "deadline") == 0) {
-        // NOTA: SCHED_DEADLINE non può essere impostato con pthread_attr_setschedpolicy();
-        // richiede la syscall sched_setattr(2) con una struct sched_attr. I thread che la
-        // richiedono falliranno attualmente in fase di creazione.
+        // ------------------------------ TODO -------------------------------------
+        // WARNING: SCHED_DEADLINE can't be set with pthread_attr_setschedpolicy();
+        // require the syscall sched_setattr(2) with a struct sched_attr. 
+        // -------------------------------------------------------------------------
         return SCHED_DEADLINE;
     }
 
-    // Fallback per NULL o stringhe sconosciute
+    // Fallback for NULL or Unknown strings
     log_message(LOG_WARN, "execution-manager", "Unknown scheduler policy '%s', defaulting to SCHED_OTHER", t_policy ? t_policy : "(null)");
     return SCHED_OTHER;
 }
+
 
 /* ----------------- Executor Manager Constructor/Distructors ----------------- */
 execution_manager_t* em_new(const gchar *name){
@@ -46,13 +47,9 @@ execution_manager_t* em_new(const gchar *name){
     execution_manager_t *em = g_new0(execution_manager_t, 1);
     em->em_name = g_string_new(name);
 
+    /* Initialise the message queues */
     GString *q_name = g_string_new(NULL);
     g_string_printf(q_name, "/%s_q", em->em_name->str);
-
-    /* With ipc: host, POSIX mqueues persist on the host across container
-     * restarts/crashes. Unlink any stale queue left over from a previous
-     * run before (re)creating it, so we never inherit old, possibly-full
-     * messages. ENOENT (queue didn't exist) is expected and ignored. */
     mq_unlink(q_name->str);
 
     struct mq_attr attr = {
@@ -69,6 +66,7 @@ execution_manager_t* em_new(const gchar *name){
     em->em_queue = qd;
     g_string_free(q_name, TRUE);
 
+    /* Initialise the redis communication */
     redisContext *c = redisConnect("redis", 6379);
     if (c != NULL && c->err ){
         log_message(LOG_ERROR, "execution-manager", "Redis connection failed: %s", c->errstr);
@@ -99,7 +97,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     g_return_if_fail(em != NULL);
     g_return_if_fail(sched != NULL);
 
-    /* 0. Drain any stale messages from previous runs */
+    /* Drain any stale messages from previous runs */
     ipc_msg_t stale_msg;
     log_message(LOG_INFO, "execution-manager", "Draining stale messages from the queue...");
     while (mq_receive(em->em_queue, (char *)&stale_msg, sizeof(ipc_msg_t), NULL) != -1) {
@@ -114,7 +112,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     gint64 time_zero_us = g_get_monotonic_time();
 
-    /* 1. Listen for incoming results from Task Wrappers */
+    /* Listen for incoming results from Task Wrappers */
     GIOChannel *channel = g_io_channel_unix_new(em->em_queue);
     g_io_channel_set_encoding(channel, NULL, NULL); // Binary messages
     g_io_channel_set_buffered(channel, FALSE);
@@ -127,7 +125,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     guint result_watch_id = g_io_add_watch(channel, G_IO_IN, (GIOFunc)handle_result_message, result_ctx);
  
 
-    /* 2. Plan the Deadlines */
+    /* Plan the Deadlines */
     for (GList *l = sched->schedule_end_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
@@ -147,7 +145,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
         g_source_unref(source);
     }
 
-    /* 3. Plan the Starts */
+    /* Plan the Starts */
     for (GList *l = sched->schedule_start_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
@@ -174,7 +172,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     g_free(result_ctx);
 
     g_main_loop_unref(loop);
-    log_message(LOG_INFO, "execution-manager", "Scheduler terminated successfully.");
+    log_message(LOG_INFO, "execution-manager", "Scheduler terminated successfully");
 }
 
 void em_wait_for_schedule(execution_manager_t *em){
@@ -196,14 +194,14 @@ gint em_read_iterations(execution_manager_t *em) {
     if (r) freeReplyObject(r);
 
     if (iterations < 1) {
-        log_message(LOG_WARN, "execution-manager", "Missing or invalid schedule iterations, running the schedule once.");
+        log_message(LOG_WARN, "execution-manager", "Missing or invalid schedule iterations, running the schedule once");
         iterations = 1;
     }
     return iterations;
 }
 
 schedule_t* em_read_schedule(execution_manager_t *em) {
-    // 1. Fetch main schedule metadata from Redis hash "schedule"
+    // Fetch main schedule metadata from Redis hash "schedule"
     redisReply *r = redisCommand(em->redis_client, "HGETALL schedule");
     if (!r || r->type == REDIS_REPLY_ERROR || r->elements == 0) {
         if (r) freeReplyObject(r);
@@ -238,7 +236,7 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
 
         // Extracting fields according to the Python loader mapping
         const char *t_id_str = redis_get_hash_value(tr, "id");
-        const char *t_image = redis_get_hash_value(tr, "image"); // Map "image" to name
+        const char *t_image = redis_get_hash_value(tr, "image"); 
         const char *t_start = redis_get_hash_value(tr, "start");
         const char *t_end = redis_get_hash_value(tr, "deadline");
         const char *t_cpu = redis_get_hash_value(tr, "cpu_affinity");
@@ -260,13 +258,8 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
         gint64 start_time = t_start ? g_ascii_strtoll(t_start, NULL, 10) : 0;
         gint64 end_time = t_end ? g_ascii_strtoll(t_end, NULL, 10) : 0;
 
-        /**
-         * Note on depends_on: 
-         * The Python loader sends a JSON list. For a simple implementation,
-         * we pass NULL here. If dependencies are needed, you should parse 
-         * the t_deps string and populate a GSList* of IDs.
-         */
-        GSList *depends_on = NULL; 
+        
+        GSList *depends_on = NULL; // TODO
 
         // Add the task to the schedule via the official method
         schedule_add_task(
@@ -276,11 +269,11 @@ schedule_t* em_read_schedule(execution_manager_t *em) {
             policy, 
             priority, 
             cpu, 
-            1,            // Default repetition to 1
+            1,              // Default repetition to 1
             depends_on, 
             start_time, 
             end_time, 
-            t_input //g_strdup(t_input)
+            t_input         //g_strdup(t_input)
         );
 
         // Clean up the reply object for this specific task
@@ -368,12 +361,10 @@ gboolean handle_result_message(GIOChannel *source, GIOCondition condition, gpoin
 
                 log_message(LOG_INFO, "execution-manager", "Received result for Task ID %u: %s", msg.task_id, msg.data.result);
 
-                // Qui puoi aggiungere la logica per marcare il task come completato nello schedule.
-                // Esempio: schedule_set_result(ctx->sched, msg.task_id, msg.data.result);
                 schedule_set_result(ctx->sched, msg.task_id, msg.data.result);
 
             } else {
-                log_message(LOG_WARN, "execution-manager", "Received unexpected type message %d.", msg.type);
+                log_message(LOG_WARN, "execution-manager", "Received unexpected type message %d", msg.type);
             }
         }
 
@@ -397,12 +388,12 @@ gboolean handle_expiration(gpointer user_data) {
             expiration_data_t *exp = (expiration_data_t *)l->data;
 
             if (schedule_is_task_completed(ctx->sched, exp->task_id)) {
-                log_message(LOG_INFO, "execution-manager", "Task %u already completed. No ABORT sent.", exp->task_id);
+                log_message(LOG_INFO, "execution-manager", "Task %u already COMPLETED", exp->task_id);
                 continue;
             }
 
             /* ---- Part only for test (disable the abort messages ) ----------- */
-            log_message(LOG_INFO, "execution-manager", "Task %u NOT completed.", exp->task_id);
+            log_message(LOG_INFO, "execution-manager", "Task %u NOT COMPLETED", exp->task_id);
             continue;
             /* ---------------------------------------------------------------- */
 

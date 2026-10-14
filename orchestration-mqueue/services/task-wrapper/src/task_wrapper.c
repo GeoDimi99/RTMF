@@ -55,7 +55,7 @@ task_wrapper_t* task_wrapper_new(const gchar *task_name, const gchar *task_queue
         tw->em_queue = mq_open(em_queue_name, O_WRONLY | O_NONBLOCK);
 
         if (tw->em_queue != (mqd_t)-1) {
-            log_message(LOG_INFO, "task-wrapper", "%s: Connected to Execution Manager queue.", task_name);
+            log_message(LOG_INFO, "task-wrapper", "%s: Connected to Execution Manager queue", task_name);
             break; // Success
         }
 
@@ -297,7 +297,7 @@ GSList* parse_input_list(const gchar *input_data) {
 
     JsonNode *root = json_parser_get_root(parser);
     if (!JSON_NODE_HOLDS_ARRAY(root)) {
-        log_message(LOG_ERROR, "task-wrapper:json-parser", "JSON root is not an array.");
+        log_message(LOG_ERROR, "task-wrapper:json-parser", "JSON root is not an array");
         g_object_unref(parser);
         return NULL;
     }
