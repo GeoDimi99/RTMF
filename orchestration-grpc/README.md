@@ -27,9 +27,32 @@ starts one task-wrapper container per task image and loads the schedule into Red
 │   └── stress_task_1..6/     # Task sources (app_task.h + app_task.c)
 ├── tools/                    # Performance report scripts (used by start-test.sh)
 ├── results/                  # One folder per test run (logs, perf.csv, stats.csv, report.pdf)
-├── docker-compose.yml
+├── docker-compose.yml        # redis + deploy-manager + execution-manager (all host network)
 └── start-test.sh             # End-to-end build, run & benchmark
 ```
+
+---
+
+## ⚙️ How it works
+
+1. **deploy-manager** (host network) parses the manifest and assigns one gRPC port to each entry of
+   `images.tasks`, in order: `50051`, `50052`, ... For every image it starts a container named
+   `task-service-<alias>` (`network_mode=host`, `ipc_mode=host`, `cap_add=[SYS_NICE]`,
+   `rtprio=99`, `memlock=unlimited`, `cpuset 0-7`, RAM-backed `/tmp`, env `TASK_NAME`, `GRPC_PORT`)
+   and waits until its gRPC server accepts connections on `localhost:<port>`.
+2. It then writes the schedule into Redis (`localhost:6379`):
+   - hash `schedule`: `name`, `version`, `description`, `length`, `iterations`
+   - hash `scheduletask:<i>` (i = 1..length, the position of the task in `schedule.tasks`):
+     `name` (image alias), `policy`, `priority`, `cpu_affinity`, `start`, `deadline`,
+     `depends_on`, `inputs`, `outputs`, `service_port`
+3. **execution-manager** (container `execution-manager-grpc`, SCHED_FIFO 95, CPU 4) reads the
+   schedule from Redis **once at start-up**, so it must be started after the deploy-manager has
+   finished. It fires every task at its `start` time with a gRPC call to `localhost:<service_port>`
+   and aborts the call when the task exceeds its `deadline`.
+4. The task-wrapper runs `task_main()` in a thread with the requested policy/priority/affinity and
+   returns the result in the gRPC response.
+
+Several schedule tasks may use the same image: they are all served by the same container.
 
 ---
 
@@ -57,12 +80,13 @@ cd RTMF/orchestration-grpc
 ./start-test.sh [test-name]
 ```
 
-`start-test.sh` builds every image, runs the whole schedule, saves the logs and generates the
-performance report in `results/<test-name>/` (a random `results/test_<id>/` when no name is given).
+`start-test.sh` builds every image (with `--no-cache`), starts Redis, runs the deploy-manager,
+then runs the execution-manager in the foreground, saves the logs (the execution-manager log is
+saved as `execution-manager.log`) and generates the performance report in `results/<test-name>/` (a random `results/test_<id>/` when no name is given).
 
 | Variable | Meaning |
 |---|---|
-| `MANIFEST=<path>` | Manifest to run (default: `tests/test_0_code/manifest.yaml`). A custom one is copied over the default. |
+| `MANIFEST=<path>` | Manifest to run (default: `tests/test_0_code/manifest.yaml`). A custom one is **copied over** `tests/test_0_code/manifest.yaml` (the original file is overwritten), so that the image-builder and the deploy-manager use the same manifest. |
 | `FORCE=1` | Overwrite `results/<test-name>/` if it already exists. |
 
 ---
@@ -72,7 +96,7 @@ performance report in `results/<test-name>/` (a random `results/test_<id>/` when
 Follow these instructions to start the system step by step:
 
 ```bash
-# 1. Build the task-wrapper base image
+# 1. Build the task-wrapper base image (tag must match images.base in the manifest)
 docker build -t rtmf/task-wrapper:orchestration-grpc \
     -f services/task-wrapper/Dockerfile .
 
@@ -88,7 +112,7 @@ docker compose up -d redis
 # 5. Deploy task-services and populate Redis
 docker compose up deploy-manager
 
-# 6. Execute the schedule
+# 6. Execute the schedule (only after step 5 has finished: it reads Redis once)
 docker compose up execution-manager
 
 # 7. Cleanup
@@ -148,27 +172,28 @@ schedule:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `images.base` | string | Base image used by every task image. |
+| `images.base` | string | Base image used by every task image. Must match the tag built in step 1. |
 | `images.repo` | string | Optional Docker repo for tagging/pushing (publishing is currently disabled). |
-| `images.tasks[].alias` | string | Local name of the image (matches `schedule.tasks[].image`). |
+| `images.tasks[].alias` | string | Local name of the image (matches `schedule.tasks[].image`). The container is `task-service-<alias>`. |
 | `images.tasks[].src` | string | Sub-folder under the build context containing `app_task.h` and `app_task.c`. |
-| `schedule.iterations` | int | How many times the whole schedule is replayed back-to-back. |
-| `schedule.tasks[].id` | int | Stable task identifier (used in logs and Redis). |
-| `schedule.tasks[].image` | string | Image alias the task runs in. Several tasks may share the same image. |
+| `schedule.name` / `description` / `version` | string | Descriptive metadata (`version` defaults to `0.0.0`). |
+| `schedule.iterations` | int | How many times the whole schedule is replayed back-to-back (default `1`, values `< 1` run it once). |
+| `schedule.tasks[].id` | int | **Not read** by this implementation: tasks are numbered by their position in `schedule.tasks` (1, 2, ...), and that number is the `task_id` in logs, Redis and `perf.csv`. Keep `id` equal to the position for consistency with the other implementations. |
+| `schedule.tasks[].image` | string | Image alias the task runs in. Must be declared under `images.tasks`. Several tasks may share the same image. **Required.** |
 | `schedule.tasks[].start` | int (ms) | Time after t₀ when the task is fired. |
 | `schedule.tasks[].deadline` | int (ms) | Absolute deadline (after t₀). The execution manager cancels the RPC if exceeded. |
-| `schedule.tasks[].policy` | enum | `fifo` → `SCHED_FIFO`, `rr` → `SCHED_RR`, `other`/`normal` → `SCHED_OTHER`, `batch` → `SCHED_BATCH`, `idle` → `SCHED_IDLE`. Default: `fifo`. |
-| `schedule.tasks[].priority` | int | RT priority `1..99` for `fifo`/`rr`; nice value `-20..19` for `other`/`normal`/`batch`. Default: `50`. |
+| `schedule.tasks[].policy` | enum | `fifo` → `SCHED_FIFO`, `rr` → `SCHED_RR`, `other`/`normal` → `SCHED_OTHER`, `batch` → `SCHED_BATCH`, `idle` → `SCHED_IDLE`. `deadline` is accepted but not supported yet (it needs `sched_setattr`). Default: `fifo`. |
+| `schedule.tasks[].priority` | int | RT priority `1..99` for `fifo`/`rr`; nice value `-20..19` for `other`/`normal`/`batch`; ignored for `idle`. Default: `50`. |
 | `schedule.tasks[].cpu_affinity` | int | CPU index the worker thread is pinned to (optional). |
-| `schedule.tasks[].depends_on` | list | Reserved for future DAG support. |
-| `schedule.tasks[].inputs` | map | Typed key/value inputs, passed to the task as a JSON object (`{"total_ops": 17, ...}`). |
-| `schedule.tasks[].outputs` | map | Declared output schema. |
+| `schedule.tasks[].depends_on` | list | Reserved for future DAG support: stored in Redis but ignored by the execution-manager. |
+| `schedule.tasks[].inputs` | map | Typed inputs; the `value`s are passed to the task as a JSON object (`{"total_ops": 17, ...}`). |
+| `schedule.tasks[].outputs` | map | Declared output schema (informative). |
 
 
 ### Task API
 
-A task is two files, `app_task.h` and `app_task.c`. The API is the same in every RTMF
-implementation, so the same task sources can be used by all of them:
+A task is two files, `app_task.h` and `app_task.c`. The API is the same in every containerised
+RTMF implementation, so the same task sources can be used by all of them:
 
 ```c
 /* app_task.h */
@@ -201,19 +226,22 @@ The task-wrapper (`services/task-wrapper/src/grpc_server.cpp`) parses the reques
 Excerpt of a run with the default manifest (6 tasks, 100 iterations):
 
 ```text
-deploy-manager      | Parsed schedule 'Configurable CPU/IO Benchmark' with 6 tasks.
-deploy-manager      | Found 6 task image(s) for 6 task(s)
-deploy-manager      | Deploying container for image 'stress_task_1' on port 50051
-deploy-manager      | Running container 'task-service-stress_task_1' from image 'stress_task_1'
-deploy-manager      | gRPC server at localhost:50051 is ready!
+deploy-manager          | [INFO] deploy-manager: Parsed schedule 'Configurable CPU/IO Benchmark' with 6 tasks.
+deploy-manager          | [INFO] deploy-manager: Found 6 task image(s) for 6 task(s)
+deploy-manager          | [INFO] deploy-manager: Deploying container for image 'stress_task_1' on port 50051
+deploy-manager          | [INFO] deploy-manager: Running container 'task-service-stress_task_1' from image 'stress_task_1'
+deploy-manager          | [INFO] deploy-manager: gRPC server at localhost:50051 is ready!
 ...
-deploy-manager      | Schedule data loaded into Redis successfully.
+deploy-manager          | [INFO] deploy-manager: Schedule data loaded into Redis successfully.
 
-execution-manager   | Execution Manager running with SCHED_FIFO priority 95
-execution-manager   | Loading schedule: 6 task(s), 100 iteration(s)
-execution-manager   | T=144 ms: task 1 'stress_task_1' COMPLETED
-execution-manager   | Result: {"result":0}
-execution-manager   | [PERF] iteration=0 task_id=1 ... total_ms=93.307 core_id=4
+execution-manager-grpc  | [INFO] execution-manager: Execution Manager running with SCHED_FIFO priority 95
+execution-manager-grpc  | [INFO] execution-manager: Reading schedule from Redis...
+execution-manager-grpc  | [INFO] execution-manager: Redis data: schedule Configurable CPU/IO Benchmark (v0.0.0), 6 task(s), 100 iteration(s)
+execution-manager-grpc  | [INFO] execution-manager: Real-time event-driven scheduler starting
+execution-manager-grpc  | [PERF] execution-manager: iteration=0 task_id=1 ... q_em_tw_ms=4.637 t_in_tw_ms=86.794 q_tw_em_ms=0.612 total_ms=92.043 core_id=4
+...
+execution-manager-grpc  | [INFO] execution-manager: All 100 iteration(s) completed
+execution-manager-grpc  | [INFO] execution-manager: Test suite finished successfully
 ```
 
 ---
@@ -248,10 +276,12 @@ docker rm -f $(docker ps -aq --filter "name=task-service-") 2>/dev/null || true
 |---|---|---|
 | `protoc: command not found` during build | Stale execution-manager image | `docker compose build --no-cache execution-manager` |
 | `gRPC connection failed` | task-service containers not up yet | `docker ps --filter "name=task-service-"` and check their logs |
+| Execution-manager reports `0 task(s)` and exits | Started before the deploy-manager filled Redis | Run the deploy-manager first and wait for it to exit with code 0 |
+| `gRPC server ... failed to become ready` (deploy-manager) | Port `5005x` already used on the host, or the task-wrapper crashed | `ss -ltnp | grep 5005` and `docker logs task-service-<alias>` |
 | `Permission denied` on `/var/run/docker.sock` | User not in `docker` group | `sudo usermod -aG docker $USER` and re-login |
 | `SCHED_FIFO` errors | Container missing `SYS_NICE` | Ensure `cap_add: [SYS_NICE]` is present in `docker-compose.yml` |
 | `Container name "/redis" is already in use` | Stale container from a previous run | `start-test.sh` removes it automatically; otherwise: `docker rm -f redis` |
-| Port `6379` already in use | A local Redis is already running | `sudo systemctl stop redis` (or change the compose port) |
+| Port `6379` already in use | A local Redis is already running (Redis uses the host network) | `sudo systemctl stop redis` |
 | Tasks miss their deadlines | CPU contention / wrong affinity | Use isolated CPUs (`isolcpus=...` boot param) and pin tasks via `cpu_affinity` |
 | The run ignores manifest changes | Manifest baked into the deploy-manager image | Rebuild it: `docker compose build deploy-manager` |
 
