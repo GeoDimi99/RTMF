@@ -6,13 +6,21 @@
 
 ---
 
+Baseline of RTMF without containers: a single host process (the **Execution Manager**) runs the
+whole schedule, launching every task as a real-time thread. There is no manifest, no Redis and
+no Docker: the schedule is defined in C in `services/execution-manager/src/main.c`.
+
 ## 📁 Repository layout
 
 ```
 .
 ├── common/
-│   ├── include/task.h               # Shared task descriptor (policy, priority, deps)
-│   └── src/task.c
+│   ├── include/
+│   │   ├── logger.h                 # Logging + [PERF] lines
+│   │   └── task.h                   # Shared task descriptor (policy, priority, deps)
+│   └── src/
+│       ├── logger.c
+│       └── task.c
 ├── services/
 │   └── execution-manager/           # The Execution Manager service
 │       ├── CMakeLists.txt
@@ -25,18 +33,41 @@
 │           ├── execution_manager.c  # Activation/expiration handlers, threads
 │           ├── main.c               # Entry point + schedule definition
 │           └── schedule.c           # Schedule construction & lifecycle
+├── tools/                           # Performance report scripts (used by start-test.sh)
+├── results/                         # One folder per test run (log, perf.csv, stats.csv, report.pdf)
 ├── docs/
 │   └── generate_context.py          # Dev helper: dump source tree to a single file
-├── start-test.sh                    # End-to-end build & run helper
+├── start-test.sh                    # End-to-end build, run & benchmark
 └── README.md
 ```
 
 ## 📋 Prerequisites
 
 - **Linux host with `PREEMPT_RT` kernel** (`SCHED_FIFO`, `mlockall`, `SYS_NICE` and POSIX timers are required for deterministic scheduling).
+- **CMake ≥ 3.20**, a C compiler, `pkg-config` and GLib (`libglib2.0-dev`, which also provides `gio-2.0`).
+- **Python 3** for the performance report (`start-test.sh` installs `matplotlib`, `numpy` and
+  `PyYAML` into `tools/.venv` when they are missing).
+- Root privileges (or `CAP_SYS_NICE` + `CAP_IPC_LOCK`) for `SCHED_FIFO` and `mlockall`.
 
+---
 
+## 🚀 Automated start
 
+```bash
+git clone https://github.com/GeoDimi99/RTMF.git
+cd RTMF/native
+sudo ./start-test.sh [test-name]
+```
+
+`start-test.sh` configures and builds the Execution Manager with CMake, runs it, saves its
+output in `results/<test-name>/execution-manager.log` (a random `results/test_<id>/` when no name
+is given) and generates the performance report there. Ctrl+C stops the run early; the report is
+built from the data collected so far.
+
+| Variable | Meaning |
+|---|---|
+| `CMAKE=<path>` | cmake binary to use (default: auto-detected). |
+| `FORCE=1` | Overwrite `results/<test-name>/` if it already exists. |
 
 ---
 
@@ -63,7 +94,18 @@ rm -rf services/execution-manager/build
 
 ---
 
+## ⚙️ Runtime behaviour
+
+- The Execution Manager pins itself to CPU 4 (`DEFAULT_EM_CPU_AFFINITY`), locks its memory and
+  runs with `SCHED_FIFO` priority 95.
+- The schedule is replayed 100 times (`num_iter` in `main.c`); every task emits a `[PERF]` line
+  that `tools/perf_report.py` turns into `perf.csv`, `stats.csv` and `report.pdf`.
+- The active schedule is the six-task benchmark used by the containerised implementations
+  (`stress_task_1..6`, `SCHED_FIFO`, CPU 5); other test scenarios are kept commented out in `main.c`.
+
 ### Adding a task
+
+Edit the schedule in `services/execution-manager/src/main.c`:
 
 ```c
 schedule_add_task(
@@ -82,10 +124,7 @@ schedule_add_task(
 );
 ```
 
-
-
-`
-
+`func_input` is a `g_new0`-allocated `input_t` (see `include/app_task.h`).
 
 ---
 
