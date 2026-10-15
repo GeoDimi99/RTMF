@@ -26,11 +26,6 @@ task_wrapper_t* task_wrapper_new(const gchar *task_name, const gchar *task_queue
     tw->task_name = g_string_new(task_name);
     tw->task_queue_name = g_string_new(task_queue_name);
 
-    /* With ipc: host, POSIX mqueues persist on the host across container
-     * restarts/crashes. Unlink any stale queue left over from a previous
-     * run before (re)creating it, so we never start with old, possibly-full
-     * messages already queued. ENOENT (queue didn't exist) is expected and
-     * ignored. */
     mq_unlink(tw->task_queue_name->str);
 
     struct mq_attr attr = {
@@ -171,13 +166,7 @@ GSList* task_wrapper_get_threads(task_wrapper_t *tw, guint16 session_id) {
     return g_slist_copy(original_list);
 }
 
-/**
- * @brief Cleanup handler for worker threads.
- * 
- * This function is registered with pthread_cleanup_push and is guaranteed to be
- * called when a thread is cancelled or exits. It frees all resources
- * associated with a task's execution.
- */
+/* Cleanup handler for worker threads */
 static void thread_resource_cleanup_handler(void* arg) {
     task_input_t *input_data = (task_input_t *)arg;
     if (!input_data) return;
@@ -383,14 +372,7 @@ gboolean handle_input_message(GIOChannel *source, GIOCondition condition, gpoint
                         }
                         
                         /* Only FIFO/RR use a static priority: OTHER/BATCH/IDLE accept only 0 (the nice
-                         * value is applied by the thread itself). A rejected param would make glibc copy
-                         * the caller's FIFO priority and pthread_create would fail with EINVAL. */
-                        /* RT threads are created at the minimum priority and raised to the target one
-                         * right after pthread_create (see below): glibc clones the thread with this
-                         * wrapper's FIFO 90 priority and then lowers it to the attr one, and a lowered
-                         * runnable FIFO thread is queued at the HEAD of its new priority list, so it
-                         * would preempt an already running task with the same priority. A raised
-                         * thread is queued at the TAIL instead, as FIFO requires. */
+                         * value is applied by the thread itself) */
                         struct sched_param param;
                         gboolean is_rt = (policy == SCHED_FIFO || policy == SCHED_RR);
                         param.sched_priority = is_rt ? sched_get_priority_min(policy) : 0;
