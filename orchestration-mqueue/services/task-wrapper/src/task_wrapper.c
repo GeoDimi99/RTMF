@@ -224,17 +224,17 @@ void * task_wrapper_run_thread(void *arg){
     /* Execution of the real task */
     gpointer res = task_main(input_data->input);
 
-    input_data->output = (output_t*) res; 
+    /* Measure the start_time_result (for the performance) */
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    glong start_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
+    /* -------------------------------------------------- */
+
+    input_data->output = (output_t*) res;
 
     /* Send the result to the em_queue */
     if (input_data->output != NULL) {
         ipc_msg_t msg_out;
         memset(&msg_out, 0, sizeof(ipc_msg_t));
-
-        /* Measure the start_time_result (for the performance) */
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        glong start_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
-        /* -------------------------------------------------- */
 
         /* Prepare the message */
 

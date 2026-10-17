@@ -7,7 +7,9 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
-#include <time.h>
+#include <time.h>            // For measure the performance
+#include <unistd.h>          // gettid()
+#include <sys/resource.h>    // setpriority() for the nice value
 
 #include "schedule.h"
 #include "execution_manager.h"
@@ -45,6 +47,8 @@ typedef struct {
     gpointer data;              // Task input
     GThreadFunc thread_func;    // Task function
     schedule_t *sched;          // Reference to the schedule for store the result
+    gint policy;                // Scheduler policy of the task thread
+    gint8 priority;             // RT priority (FIFO/RR) or nice value (OTHER/BATCH)
     glong start_time_request;   // For measure the performance (dispatch time, before thread creation)
 } task_wrapper_input_t;
 

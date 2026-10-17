@@ -467,12 +467,8 @@ void* task_wrapper_func(void* data){
         }
     }
 
-    log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: start thread function", task_id);
-    
     /* Run the thread function */
     gpointer res = task_main(input);
-
-    log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: termination thread function", task_id);
 
     /* Measure the start_time_result (for the performance) */
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -482,10 +478,12 @@ void* task_wrapper_func(void* data){
     /* Write the result */
     schedule_set_result(sched, task_id, "{}");
 
-    /* Measure the end_time_result (for the performance) */
+    /* Measure the end_time_result (for the performance): after the result is stored in the schedule */
     clock_gettime(CLOCK_MONOTONIC, &ts);
     glong end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
     /* -------------------------------------------------- */
+
+    log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: termination thread function", task_id);
 
     /* Log the performance metrics to be analysed */
     log_perf("task-wrapper", iteration, task_id, start_time_request, end_time_request, start_time_result, end_time_result, core_id);

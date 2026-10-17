@@ -33,16 +33,15 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
 
     
 
-    /* 1. Plan the scheudle DEADLINES */
+    /* Plan the scheudle DEADLINES */
     for (GList *l = sched->schedule_end_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
-        /* CORREZIONE: Uso deadline_context_t invece di context_t */
         deadline_context_t *ctx = g_new0(deadline_context_t, 1);
         ctx->data = entry->data_list;
         ctx->loop = loop;
         ctx->timestamp = entry->timestamp;
-        ctx->is_last = (l->next == NULL); // Se è l'ultimo nodo della GQueue
+        ctx->is_last = (l->next == NULL);
         ctx->sched = sched;
 
         gint64 target_mono_us = time_zero_us + (entry->timestamp * 1000);
@@ -54,7 +53,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
         g_source_unref(source);
     }
 
-    /* 2. Plan the schedule STARTS */
+    /* Plan the schedule STARTS */
     for (GList *l = sched->schedule_start_info->head; l != NULL; l = l->next) {
         timeline_entry_t *entry = (timeline_entry_t *)l->data;
 
@@ -78,7 +77,7 @@ void em_run_schedule(execution_manager_t *em, schedule_t *sched) {
     g_main_loop_run(loop);
 
     g_main_loop_unref(loop);
-    log_message(LOG_INFO, "execution-manager", "Scheduler terminated successfully.");
+    log_message(LOG_INFO, "execution-manager", "Scheduler terminated successfully");
 }
 
 void* task_wrapper_func(void* data){
@@ -102,11 +101,25 @@ void* task_wrapper_func(void* data){
     gint core_id = sched_getcpu();
     /* -------------------------------------------------- */
 
-    log_message(LOG_DEBUG, "execution-manager", "ThreadCall %u: start thread function.", task_id);
+    /* glibc rejects SCHED_BATCH/SCHED_IDLE in pthread_attr_setschedpolicy (EINVAL), so the thread
+     * is created as SCHED_OTHER and switches itself to the requested policy */
+    if (tw_input->policy == SCHED_BATCH || tw_input->policy == SCHED_IDLE) {
+        struct sched_param self_param = { .sched_priority = 0 };
+        if (sched_setscheduler(0, tw_input->policy, &self_param) == -1) {
+            log_message(LOG_WARN, "execution-manager", "Failed to set policy %d for Task ID %u: %s", tw_input->policy, task_id, g_strerror(errno));
+        }
+    }
+
+    /* For the non-RT policies the "priority" is the nice value: it cannot be set through
+     * the pthread attributes, so the thread applies it to itself (nice is per-thread on Linux) */
+    if ((tw_input->policy == SCHED_OTHER || tw_input->policy == SCHED_BATCH) && tw_input->priority != 0) {
+        if (setpriority(PRIO_PROCESS, gettid(), tw_input->priority) == -1) {
+            log_message(LOG_WARN, "execution-manager", "Failed to set nice %d for Task ID %u: %s", tw_input->priority, task_id, g_strerror(errno));
+        }
+    }
+
     /* Run the thread function */
     gpointer res = thread_func(input);
-
-    log_message(LOG_DEBUG, "execution-manager", "ThreadCall %u: termination thread function.", task_id);
 
     /* Measure the start_time_result (for the performance) */
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -116,12 +129,14 @@ void* task_wrapper_func(void* data){
     /* Write the result */
     schedule_set_result(sched, task_id, "{}");
 
-    /* Measure the end_time_result (for the performance) */
+    /* Measure the end_time_result (for the performance): after the result is stored in the schedule */
     clock_gettime(CLOCK_MONOTONIC, &ts);
     glong end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
     /* -------------------------------------------------- */
 
-    /* Print the performance metrics to be analysed */
+    log_message(LOG_DEBUG, "execution-manager", "ThreadCall %u: termination thread function", task_id);
+
+    /* Log the performance metrics to be analysed */
     log_perf("execution-manager", iteration, task_id, start_time_request, end_time_request, start_time_result, end_time_result, core_id);
 
     /* Cleanup */
@@ -156,6 +171,8 @@ gboolean handle_initialization(gpointer user_data) {
         tw_input->data = task->input_data;
         tw_input->thread_func = task->task_exec;
         tw_input->sched = sched;
+        tw_input->policy = task->policy;
+        tw_input->priority = task->priority;
 
         /* Measure the start_time_request (for the performance) */
         struct timespec ts;
@@ -178,12 +195,22 @@ gboolean handle_initialization(gpointer user_data) {
         }
 
         /* Setting scheduler policy and priority */
+        /* Only FIFO/RR use a static priority: OTHER/BATCH/IDLE accept only 0 (the nice value is
+         * applied by the thread itself) */
         struct sched_param param;
-        param.sched_priority = task->priority;
+        gboolean is_rt = (task->policy == SCHED_FIFO || task->policy == SCHED_RR);
+        param.sched_priority = is_rt ? sched_get_priority_min(task->policy) : 0;
+
+        /* BATCH/IDLE are not accepted by the pthread attributes: create the thread as OTHER,
+         * it applies the requested policy to itself (see task_wrapper_func) */
+        gint attr_policy = (task->policy == SCHED_BATCH || task->policy == SCHED_IDLE) ? SCHED_OTHER : task->policy;
 
         pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN);
-        pthread_attr_setschedpolicy(&attr, task->policy);
-        pthread_attr_setschedparam(&attr, &param);
+        pthread_attr_setschedpolicy(&attr, attr_policy);
+        gint param_err = pthread_attr_setschedparam(&attr, &param);
+        if (param_err != 0) {
+            log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", param.sched_priority, task->task_id, param_err, g_strerror(param_err));
+        }
         pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
 
         pthread_t thread;
@@ -191,7 +218,17 @@ gboolean handle_initialization(gpointer user_data) {
         pthread_attr_destroy(&attr); // Clean up attributes
         if (rc) {
             log_message(LOG_ERROR, "execution-manager", "pthread_create failed with code %d (%s) for Task ID %u", rc, g_strerror(rc), task->task_id);
+            g_free(tw_input);
             continue;
+        }
+
+        /* Raise the RT thread to its target priority: it is queued at the tail of that priority list */
+        if (is_rt) {
+            param.sched_priority = task->priority;
+            gint prio_err = pthread_setschedparam(thread, task->policy, &param);
+            if (prio_err != 0) {
+                log_message(LOG_WARN, "execution-manager", "Invalid priority %d for Task ID %u. Error: %d (%s)", task->priority, task->task_id, prio_err, g_strerror(prio_err));
+            }
         }
         pthread_detach(thread);
 
@@ -229,7 +266,7 @@ gboolean handle_expiration(gpointer user_data) {
 
             /* Check if the task is jet completed*/
             if (schedule_is_task_completed(ctx->sched, exp->task_id)) {
-                log_message(LOG_INFO, "execution-manager", "Task %u already completed.", exp->task_id);
+                log_message(LOG_INFO, "execution-manager", "Task %u already completed", exp->task_id);
                 continue;
             }
             log_message(LOG_INFO, "execution-manager", "Sent ABORT for Task ID %u", exp->task_id);
@@ -237,7 +274,7 @@ gboolean handle_expiration(gpointer user_data) {
     }
 
     if (ctx->is_last) {
-        log_message(LOG_INFO, "execution-manager", "Final deadline reached. Quitting...");
+        log_message(LOG_INFO, "execution-manager", "handle_expiration: final deadline reached. Quitting...");
         g_main_loop_quit(ctx->loop);
     }
 

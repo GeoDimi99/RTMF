@@ -297,21 +297,7 @@ static void scheduler_task_callback(unsigned int task_id,
         log_message(LOG_INFO, "execution-manager", "T=%lu ms: task %d '%s' STARTED",
                get_elapsed_ms(), task->task_id, task->task_name);
     } else if (strcmp(status, "COMPLETED") == 0) {
-        log_message(LOG_INFO, "execution-manager", "T=%lu ms: task %d '%s' COMPLETED",
-               get_elapsed_ms(), task->task_id, task->task_name);
-        log_message(LOG_INFO, "execution-manager", "Result: %s", result_json);
-
-        /* Measure the end_time_result (for the performance) */
-        struct timespec ts;
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        long end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
-        /* -------------------------------------------------- */
-
-        /* Log the performance metrics to be analysed */
-        log_perf("execution-manager", iteration, task->task_id, task->start_time_request,
-                  end_time_request, start_time_result, end_time_result, core_id);
-        /* --------------------------------------------------- */
-
+        /* Store the result: equivalent of schedule_set_result() in the other versions */
         pthread_mutex_lock(&task->lock);
         if (task->status == TASK_STATUS_RUNNING) {
             task->status = TASK_STATUS_COMPLETED;
@@ -319,6 +305,21 @@ static void scheduler_task_callback(unsigned int task_id,
             notify_task_finished(task);
         }
         pthread_mutex_unlock(&task->lock);
+
+        /* Measure the end_time_result (for the performance): after the result is stored */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        long end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
+        /* -------------------------------------------------- */
+
+        log_message(LOG_INFO, "execution-manager", "T=%lu ms: task %d '%s' COMPLETED",
+               get_elapsed_ms(), task->task_id, task->task_name);
+        log_message(LOG_INFO, "execution-manager", "Result: %s", result_json);
+
+        /* Log the performance metrics to be analysed */
+        log_perf("execution-manager", iteration, task->task_id, task->start_time_request,
+                  end_time_request, start_time_result, end_time_result, core_id);
+        /* --------------------------------------------------- */
 
     } else if (strcmp(status, "ERROR") == 0) {
         log_message(LOG_ERROR, "execution-manager", "T=%lu ms: task %d '%s' ERROR: %s",
@@ -348,12 +349,6 @@ static void *grpc_task_thread(void *arg) {
     scheduled_task_t *task = args->task;
 
     log_message(LOG_DEBUG, "execution-manager", "Thread for task %d starting...", task->task_id);
-
-    /* Measure the start_time_request (for the performance) */
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    task->start_time_request = ts.tv_sec * 1000000000L + ts.tv_nsec;
-    /* --------------------------------------------------- */
 
     // grpc_execute_task_async blocks until the result arrives, so it runs in its own thread
     // and the scheduler thread stays free. It is not cancelled at the task deadline: the
@@ -385,6 +380,13 @@ static void launch_task(scheduled_task_t *task) {
     task->status = TASK_STATUS_RUNNING;
     pthread_mutex_unlock(&task->lock);
     
+    /* Measure the start_time_request (for the performance): at the dispatch point, before
+     * the thread that issues the gRPC call is created */
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    task->start_time_request = ts.tv_sec * 1000000000L + ts.tv_nsec;
+    /* --------------------------------------------------- */
+
     // Create thread for gRPC call
     grpc_thread_args_t *args = malloc(sizeof(grpc_thread_args_t));
     args->task = task;

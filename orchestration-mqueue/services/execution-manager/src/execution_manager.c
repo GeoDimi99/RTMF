@@ -349,7 +349,9 @@ gboolean handle_result_message(GIOChannel *source, GIOCondition condition, gpoin
             
             if (msg.type == MSG_TASK_RESULT) {
 
-                /* Measure the end_time_result (for the performance) */
+                schedule_set_result(ctx->sched, msg.task_id, msg.data.result);
+
+                /* Measure the end_time_result (for the performance): after the result is stored in the schedule */
                 struct timespec ts;
                 clock_gettime(CLOCK_MONOTONIC, &ts);
                 glong end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
@@ -360,8 +362,6 @@ gboolean handle_result_message(GIOChannel *source, GIOCondition condition, gpoin
                 /* --------------------------------------------- */
 
                 log_message(LOG_INFO, "execution-manager", "Received result for Task ID %u: %s", msg.task_id, msg.data.result);
-
-                schedule_set_result(ctx->sched, msg.task_id, msg.data.result);
 
             } else {
                 log_message(LOG_WARN, "execution-manager", "Received unexpected type message %d", msg.type);

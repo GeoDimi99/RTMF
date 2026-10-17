@@ -24,7 +24,7 @@ volatile gboolean keep_running = TRUE;
 /* Signal Handler for SIGINT (Ctrl+C) */
 void int_handler(int dummy) {
     (void)dummy;
-    log_message(LOG_INFO, "execution-manager", "SIGINT received.");
+    log_message(LOG_INFO, "execution-manager", "SIGINT received");
     keep_running = FALSE;
 }
 
@@ -48,7 +48,9 @@ int main(int argc, char *argv[]) {
     /* Setting scheduler policy and priority*/
     struct sched_param param;
     param.sched_priority = 95;
-    sched_setscheduler(0, SCHED_FIFO, &param);
+    if (sched_setscheduler(0, SCHED_FIFO, &param) == -1) {
+        log_message(LOG_WARN, "execution-manager", "sched_setscheduler failed: %s. Try running with root privileges", g_strerror(errno));
+    }
 
 
     /* Registre the signal handler for a clean clousure */
@@ -58,14 +60,13 @@ int main(int argc, char *argv[]) {
     int exit_code = 0;
     execution_manager_t *em = em_new(DEFAULT_EXECUTION_MANAGER_NAME);
     if (!em) {
-        log_message(LOG_ERROR, "execution-manager", "em_new failed.");
+        log_message(LOG_ERROR, "execution-manager", "em_new failed");
         exit(EXIT_FAILURE);
     }
 
     schedule_t *sched = NULL; // Init to NULL
 
-    log_message(LOG_INFO, "execution-manager", "Execution Manager Initialized");
-    log_message(LOG_INFO, "execution-manager", "Click Ctrl+C for a clean exit.");
+    log_message(LOG_INFO, "execution-manager", "Initialized (Click Ctrl+C for a clean exit)");
 
     /* Control for new schedule */
     gboolean is_set_new_schedule = TRUE;
@@ -91,13 +92,16 @@ int main(int argc, char *argv[]) {
             gchar *schedule_name = "schedule";
             sched = schedule_new(schedule_name, "0.0.1");
             if (!sched) {
-                log_message(LOG_ERROR, "execution-manager", "(%s) : scheduler creation failed.", schedule_name);
+                log_message(LOG_ERROR, "execution-manager", "(%s) : scheduler creation failed", schedule_name);
                 exit(EXIT_FAILURE);
             }
 
             
 
             // void schedule_add_task(schedule_t *sched, guint16 id, const gchar *name, GThreadFunc task_exec, gint policy, gint8 priority, gint cpu_affinity, guint8 repetition, GSList *depends_on,  gint64 start_time, gint64 end_time, gpointer input);
+            //   policy:   SCHED_FIFO, SCHED_RR             -> priority is the RT priority (1..99)
+            //             SCHED_OTHER (SCHED_NORMAL), SCHED_BATCH -> priority is the nice value (-20..19)
+            //             SCHED_IDLE                       -> priority is ignored (use 0)
             
 
             /* ***********************************
@@ -275,7 +279,7 @@ schedule_add_task(sched, 6, "stress_task_6", task_main, SCHED_FIFO, 60, 5, 1, NU
         }
 
         /* Run the schedule */
-        log_message(LOG_INFO, "execution-manager", "Start iteration %d, progress percentage %d%%", i, (i*100)/num_iter);
+        log_message(LOG_INFO, "execution-manager", "Start iteration %d/%d, progress percentage %d%%", i, num_iter, (i*100)/num_iter);
         em_run_schedule(em, sched);
         
 
@@ -294,6 +298,6 @@ schedule_add_task(sched, 6, "stress_task_6", task_main, SCHED_FIFO, 60, 5, 1, NU
     if (em) em_free(em);
     if (sched) schedule_free(sched);
 
-    log_message(LOG_INFO, "execution-manager", "Cleanup completed.");
+    log_message(LOG_INFO, "execution-manager", "Cleanup completed");
     return exit_code;
 }
