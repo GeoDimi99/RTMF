@@ -10,29 +10,41 @@ import time
 
 logger = get_logger("deploy-manager")
 
-def wait_for_grpc_ready(host, port, timeout=30, retry_interval=0.5):
+# gRPC runs over Unix domain sockets (like the ipc:// endpoints of choreography-zeromq):
+# loopback TCP is received by ksoftirqd (SCHED_OTHER) on the PREEMPT_RT kernel, so a task
+# computing on the core of the middleware delayed every request/result until it ended.
+# The task services and the execution manager share this directory (see runner.py and
+# docker-compose.yml); the port number only identifies the socket of each task service.
+GRPC_IPC_DIR = "/ipc"
+
+
+def grpc_socket_path(port):
+    return f"{GRPC_IPC_DIR}/task_{port}.sock"
+
+
+def wait_for_grpc_ready(socket_path, timeout=30, retry_interval=0.5):
     """
-    Wait for gRPC server to be ready by attempting to connect to the port.
+    Wait for gRPC server to be ready by attempting to connect to its Unix socket.
     """
-    logger.info(f"Waiting for gRPC server at {host}:{port} to be ready...")
+    logger.info(f"Waiting for gRPC server at unix://{socket_path} to be ready...")
     start_time = time.time()
 
     while time.time() - start_time < timeout:
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex((host, port))
+            result = sock.connect_ex(socket_path)
             sock.close()
 
             if result == 0:
-                logger.info(f"gRPC server at {host}:{port} is ready!")
+                logger.info(f"gRPC server at unix://{socket_path} is ready!")
                 return True
         except Exception as e:
             pass
 
         time.sleep(retry_interval)
 
-    logger.warning(f"gRPC server at {host}:{port} not ready after {timeout}s")
+    logger.warning(f"gRPC server at unix://{socket_path} not ready after {timeout}s")
     return False
 
 def main():
@@ -75,10 +87,10 @@ def main():
                 grpc_port=port,
             )
 
-            # Wait for gRPC server to be ready on the assigned port
-            # With host networking, use localhost instead of container name
-            if not wait_for_grpc_ready("localhost", port, timeout=30):
-                raise DeployManagerError(f"gRPC server for '{container_name}' failed to become ready on port {port}")
+            # Wait for gRPC server to be ready on the socket of the assigned port
+            socket_path = grpc_socket_path(port)
+            if not wait_for_grpc_ready(socket_path, timeout=30):
+                raise DeployManagerError(f"gRPC server for '{container_name}' failed to become ready on {socket_path}")
 
         # Load schedule and tasks into Redis - driven by the 'schedule:' section of the DSL
         # This loads ALL tasks, even if they share the same image/container

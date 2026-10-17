@@ -187,7 +187,7 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         // (the nice value is applied by the thread itself). A rejected param would make glibc
         // copy the caller's FIFO priority and pthread_create would fail with EINVAL.
         // RT threads are created at the minimum priority and raised to the target one right
-        // after pthread_create: glibc clones the thread with the server's FIFO 85 priority and
+        // after pthread_create: glibc clones the thread with the server's FIFO 90 priority and
         // then lowers it to the attr one, and a lowered runnable FIFO thread is queued at the
         // HEAD of its new priority list, so it would preempt an already running task with the
         // same priority. A raised thread is queued at the TAIL instead, as FIFO requires.
@@ -302,7 +302,7 @@ class TaskExecutorServiceImpl final : public TaskExecutor::Service {
         int policy = policy_from_string(policy_str);
 
         // The explicit policy is applied also for OTHER/BATCH/IDLE: otherwise the thread would
-        // inherit the SCHED_FIFO 85 of the gRPC server thread.
+        // inherit the SCHED_FIFO 90 of the gRPC server thread.
         bool is_rt = (policy == SCHED_FIFO || policy == SCHED_RR);
         {
             log_message(LOG_DEBUG, "task-wrapper", "Setting policy '%s' with priority %d", policy_str.c_str(), priority_val);
@@ -474,22 +474,28 @@ int main(int argc, char** argv) {
         log_message(LOG_WARN, "task-wrapper", "mlockall failed (need root privileges)");
     }
 
-    // Set Real-Time Scheduling: SCHED_FIFO with priority 85
+    // Set Real-Time Scheduling: SCHED_FIFO with priority 90, the middleware priority used by
+    // all the implementations (above every task; inherited by the gRPC server threads)
     struct sched_param rt_param;
-    rt_param.sched_priority = 85;
+    rt_param.sched_priority = 90;
     if (sched_setscheduler(0, SCHED_FIFO, &rt_param) != 0) {
         log_message(LOG_WARN, "task-wrapper", "Failed to set RT scheduling (need root or CAP_SYS_NICE)");
         log_message(LOG_WARN, "task-wrapper", "Running with SCHED_OTHER");
     } else {
-        log_message(LOG_INFO, "task-wrapper", "Running with SCHED_FIFO priority 85");
+        log_message(LOG_INFO, "task-wrapper", "Running with SCHED_FIFO priority %d", rt_param.sched_priority);
     }
 
     // Get task name and port from environment
     const char* task_name = getenv("TASK_NAME");
     const char* grpc_port = getenv("GRPC_PORT");
 
-    std::string server_address = "0.0.0.0:";
+    // gRPC over a Unix domain socket (like the ipc:// endpoints of choreography-zeromq):
+    // loopback TCP is received by ksoftirqd (SCHED_OTHER) on the PREEMPT_RT kernel, so a
+    // task computing on core 4 delayed every request/result until it ended. The port only
+    // identifies the socket; /ipc is shared with the execution manager.
+    std::string server_address = "unix:///ipc/task_";
     server_address += grpc_port ? grpc_port : "50051";  // Default to 50051 if not set
+    server_address += ".sock";
 
     // Pin gRPC server and its internal threads to CPU 4.
     // Task execution threads (task_main_wrapper) are pinned to CPU 5.

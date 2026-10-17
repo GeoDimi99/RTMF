@@ -39,15 +39,19 @@ starts one task-wrapper container per task image and loads the schedule into Red
    `images.tasks`, in order: `50051`, `50052`, ... For every image it starts a container named
    `task-service-<alias>` (`network_mode=host`, `ipc_mode=host`, `cap_add=[SYS_NICE]`,
    `rtprio=99`, `memlock=unlimited`, `cpuset 0-7`, RAM-backed `/tmp`, env `TASK_NAME`, `GRPC_PORT`)
-   and waits until its gRPC server accepts connections on `localhost:<port>`.
+   and waits until its gRPC server accepts connections on the Unix socket `/ipc/task_<port>.sock`.
+   gRPC runs over Unix domain sockets (host directory `/tmp/rtmf-grpc-ipc`, mounted as `/ipc` in
+   the task services, deploy-manager and execution-manager), like the `ipc://` endpoints of
+   choreography-zeromq: on the PREEMPT_RT kernel loopback TCP is received by `ksoftirqd`
+   (SCHED_OTHER), so a task computing on core 4 delayed every request and result until it ended.
 2. It then writes the schedule into Redis (`localhost:6379`):
    - hash `schedule`: `name`, `version`, `description`, `length`, `iterations`
    - hash `scheduletask:<i>` (i = 1..length, the position of the task in `schedule.tasks`):
      `name` (image alias), `policy`, `priority`, `cpu_affinity`, `start`, `deadline`,
      `depends_on`, `inputs`, `outputs`, `service_port`
-3. **execution-manager** (container `execution-manager-grpc`, SCHED_FIFO 95, CPU 4) reads the
+3. **execution-manager** (container `execution-manager-grpc`, SCHED_FIFO 90, CPU 4) reads the
    schedule from Redis **once at start-up**, so it must be started after the deploy-manager has
-   finished. It fires every task at its `start` time with a gRPC call to `localhost:<service_port>`
+   finished. It fires every task at its `start` time with a gRPC call to `unix:///ipc/task_<service_port>.sock`
    and aborts the call when the task exceeds its `deadline`.
 4. The task-wrapper runs `task_main()` in a thread with the requested policy/priority/affinity and
    returns the result in the gRPC response.
@@ -230,11 +234,11 @@ deploy-manager          | [INFO] deploy-manager: Parsed schedule 'Configurable C
 deploy-manager          | [INFO] deploy-manager: Found 6 task image(s) for 6 task(s)
 deploy-manager          | [INFO] deploy-manager: Deploying container for image 'stress_task_1' on port 50051
 deploy-manager          | [INFO] deploy-manager: Running container 'task-service-stress_task_1' from image 'stress_task_1'
-deploy-manager          | [INFO] deploy-manager: gRPC server at localhost:50051 is ready!
+deploy-manager          | [INFO] deploy-manager: gRPC server at unix:///ipc/task_50051.sock is ready!
 ...
 deploy-manager          | [INFO] deploy-manager: Schedule data loaded into Redis successfully.
 
-execution-manager-grpc  | [INFO] execution-manager: Execution Manager running with SCHED_FIFO priority 95
+execution-manager-grpc  | [INFO] execution-manager: Execution Manager running with SCHED_FIFO priority 90
 execution-manager-grpc  | [INFO] execution-manager: Reading schedule from Redis...
 execution-manager-grpc  | [INFO] execution-manager: Redis data: schedule Configurable CPU/IO Benchmark (v0.0.0), 6 task(s), 100 iteration(s)
 execution-manager-grpc  | [INFO] execution-manager: Real-time event-driven scheduler starting

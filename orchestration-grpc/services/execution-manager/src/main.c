@@ -152,8 +152,12 @@ int main(int argc, char *argv[]) {
     // ========================================
     // Set Real-Time Scheduling for Execution Manager
     // ========================================
+    // Same scheme as the other implementations: the whole middleware runs at SCHED_FIFO 90,
+    // above every task. All the threads created afterwards (gRPC call threads, gRPC internal
+    // threads, RT timer thread) inherit it, like the ZeroMQ I/O threads in choreography-zeromq:
+    // they send the requests and receive the results, so they must not wait for the tasks.
     struct sched_param param;
-    param.sched_priority = 95;  // High priority (range 1-99, higher than task priorities)
+    param.sched_priority = 90;
 
     if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
         log_message(LOG_WARN, "execution-manager", "Failed to set RT scheduling (need root or CAP_SYS_NICE): %s", strerror(errno));
@@ -161,28 +165,6 @@ int main(int argc, char *argv[]) {
     } else {
         log_message(LOG_INFO, "execution-manager", "Execution Manager running with SCHED_FIFO priority %d",
                param.sched_priority);
-        log_message(LOG_INFO, "execution-manager", "This ensures precise timing and prevents preemption by tasks");
-
-
-        // Force SCHED_OTHER as the default for all threads created with NULL attrs.
-        // Without this, gRPC internal threads (created via pthread_create(NULL,...))
-        // inherit SCHED_FIFO from their creator.  Two SCHED_FIFO threads at the same
-        // priority are non-preemptive: if a gRPC thread is running at T=11000ms the
-        // main thread cannot be scheduled even though its timerfd fired.
-        pthread_attr_t default_attr;
-        struct sched_param default_param = {.sched_priority = 45};
-        pthread_attr_init(&default_attr);
-        pthread_attr_setinheritsched(&default_attr, PTHREAD_EXPLICIT_SCHED);
-        pthread_attr_setschedpolicy(&default_attr, SCHED_FIFO);
-        pthread_attr_setschedparam(&default_attr, &default_param);
-        if (pthread_setattr_default_np(&default_attr) != 0) {
-            log_message(LOG_WARN, "execution-manager", "pthread_setattr_default_np failed: %s", strerror(errno));
-        } else {
-            log_message(LOG_INFO, "execution-manager", "Default thread policy set to SCHED_FIFO 45");
-            log_message(LOG_INFO, "execution-manager", "gRPC internal threads: RT scheduling, below task threads (50/65)");
-        }
-        pthread_attr_destroy(&default_attr);
-
     }
 
     // ========================================

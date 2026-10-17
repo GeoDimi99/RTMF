@@ -22,22 +22,15 @@ schedule:
   description: "Benchmark with configurable CPU/IO ratio using total_ops and io_percentage parameters"
   iterations: 100
   
-  # Under SCHED_OTHER the static RT priority must be 0, so the "priority"
-  # field here is interpreted as the nice value (-20..19, lower = higher prio).
-  # Linear mapping of the RT range [1, 99] onto the nice range [19, -20]:
-  #   nice = 19 - (rt_prio - 1) * 39 / 98   (rounded; ties toward higher prio)
-  #   RT 70 (task 3)        -> -8.46 -> nice -8
-  #   RT 60 (tasks 4, 5, 6) -> -4.48 -> nice -4
-  #   RT 50 (tasks 1, 2)    -> -0.50 -> nice -1
-
   tasks:
+    # ===================== CORE 5 =====================
     - id: 1
       image: "stress_task_1"
       start: 50
       deadline: 650
-      cpu_affinity: 4
-      policy: "normal"
-      priority: -1         # RT 50 -> nice -1
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 50
       depends_on: []
       inputs:
         total_ops:
@@ -54,9 +47,9 @@ schedule:
       image: "stress_task_2"
       start: 300
       deadline: 1300
-      cpu_affinity: 4
-      policy: "normal"
-      priority: -1         # RT 50 -> nice -1
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 50
       depends_on: []
       inputs:
         total_ops:
@@ -73,9 +66,9 @@ schedule:
       image: "stress_task_3"
       start: 350
       deadline: 950
-      cpu_affinity: 4
-      policy: "normal"
-      priority: -8         # RT 70 -> nice -8
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 70
       depends_on: []
       inputs:
         total_ops:
@@ -92,9 +85,9 @@ schedule:
       image: "stress_task_4"
       start: 370
       deadline: 970
-      cpu_affinity: 4
-      policy: "normal"
-      priority: -4         # RT 60 -> nice -4
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 60
       depends_on: []
       inputs:
         total_ops:
@@ -111,9 +104,9 @@ schedule:
       image: "stress_task_5"
       start: 600
       deadline: 1200
-      cpu_affinity: 4
-      policy: "normal"
-      priority: -4         # RT 60 -> nice -4
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 60
       depends_on: []
       inputs:
         total_ops:
@@ -130,9 +123,124 @@ schedule:
       image: "stress_task_6"
       start: 650
       deadline: 1250
+      cpu_affinity: 5
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    # ===================== CORE 4 =====================
+    - id: 7
+      image: "stress_task_1"
+      start: 50
+      deadline: 650
       cpu_affinity: 4
-      policy: "normal"
-      priority: -4         # RT 60 -> nice -4
+      policy: "fifo"
+      priority: 50
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    - id: 8
+      image: "stress_task_2"
+      start: 300
+      deadline: 1300
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 50
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    - id: 9
+      image: "stress_task_3"
+      start: 350
+      deadline: 950
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 70
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    - id: 10
+      image: "stress_task_4"
+      start: 370
+      deadline: 970
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    - id: 11
+      image: "stress_task_5"
+      start: 600
+      deadline: 1200
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
+      depends_on: []
+      inputs:
+        total_ops:
+          type: int
+          value: 16
+        io_percentage:
+          type: int
+          value: 0
+      outputs:
+        result:
+          type: int
+
+    - id: 12
+      image: "stress_task_6"
+      start: 650
+      deadline: 1250
+      cpu_affinity: 4
+      policy: "fifo"
+      priority: 60
       depends_on: []
       inputs:
         total_ops:

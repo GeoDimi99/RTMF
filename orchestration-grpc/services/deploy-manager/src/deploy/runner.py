@@ -4,6 +4,10 @@ from ..exceptions import DeployManagerError
 
 logger = get_logger("deploy-manager")
 
+# Host directory shared as /ipc by the task services, the deploy manager and the execution
+# manager: it holds the Unix domain sockets of the gRPC servers (see main.py)
+GRPC_IPC_HOST_DIR = "/tmp/rtmf-grpc-ipc"
+
 class DockerContainerRunner:
     """
     Runs Docker containers for task services with the required real-time privileges.
@@ -41,12 +45,13 @@ class DockerContainerRunner:
                 detach=detach,
                 tty=True,
                 ipc_mode="host",
-                network_mode="host",  # Use host networking for minimal gRPC latency
+                network_mode="host",
+                volumes={GRPC_IPC_HOST_DIR: {"bind": "/ipc", "mode": "rw"}},  # gRPC Unix sockets
                 cap_add=["SYS_NICE"],
                 environment={
                     "TASK_NAME": image_tag,
                     "TASK_QUEUE_NAME": image_tag,
-                    "GRPC_PORT": str(grpc_port),  # Assign unique port to each task service
+                    "GRPC_PORT": str(grpc_port),  # Unique id of the task service socket (/ipc/task_<port>.sock)
                     },
                 ulimits=[
                     docker.types.Ulimit(name="rtprio", soft=99, hard=99),

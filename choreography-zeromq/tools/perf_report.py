@@ -9,7 +9,8 @@ Reads the PERF lines emitted by the execution manager(s):
 
 and writes into --out:
     perf.csv     every PERF record
-    stats.csv    per task / metric statistics
+    stats.csv    per task / metric statistics (without the first
+                 --skip-iterations warm-up iterations, default 1)
     report.pdf   cover, statistics tables, one Gantt page per iteration
 """
 import argparse
@@ -134,6 +135,7 @@ def stats_rows(records, plan):
                 "min": float(v.min()),
                 "max": float(v.max()),
                 "median": float(np.median(v)),
+                "p95": float(np.percentile(v, 95)),
                 "p99": float(np.percentile(v, 99)),
             })
     return rows
@@ -149,10 +151,10 @@ def write_csvs(out, records, rows, plan):
     with open(out / "stats.csv", "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["task_id", "image", "metric", "n", "mean_ms", "std_ms",
-                    "min_ms", "max_ms", "median_ms", "p99_ms"])
+                    "min_ms", "max_ms", "median_ms", "p95_ms", "p99_ms"])
         for s in rows:
             w.writerow([s["task_id"], s["image"], s["metric"], s["n"]]
-                       + [f"{s[k]:.3f}" for k in ("mean", "std", "min", "max", "median", "p99")])
+                       + [f"{s[k]:.3f}" for k in ("mean", "std", "min", "max", "median", "p95", "p99")])
 
 
 def footer(fig, title, page_no, page_total):
@@ -178,7 +180,7 @@ def cover_page(pdf, info):
 
 def stats_pages(pdf, rows, info, first_page_no):
     header = ["Task ID", "Image name", "Metric", "Mean", "Std Dev",
-              "Min", "Max", "Median", "p99"]
+              "Min", "Max", "Median", "p95", "p99"]
     tasks = sorted({s["task_id"] for s in rows})
     per_page = 6
     chunks = [tasks[i:i + per_page] for i in range(0, len(tasks), per_page)]
@@ -189,6 +191,7 @@ def stats_pages(pdf, rows, info, first_page_no):
         fig.text(0.04, 0.94, "Statistics summary", fontsize=18, color=INK, weight="bold")
         fig.text(0.04, 0.905,
                  f"All values in milliseconds  |  samples per task: {n_txt} iteration(s)"
+                 + info["stats_scope"]
                  + (f"  |  tasks {chunk[0]}-{chunk[-1]}" if len(chunks) > 1 else ""),
                  fontsize=10, color=INK_2)
         body, groups = [], []
@@ -196,12 +199,12 @@ def stats_pages(pdf, rows, info, first_page_no):
             for mi, s in enumerate(x for x in rows if x["task_id"] == tid):
                 body.append([str(tid) if mi == 0 else "", s["image"] if mi == 0 else "",
                              s["metric"]] + [f"{s[k]:.3f}" for k in
-                                             ("mean", "std", "min", "max", "median", "p99")])
+                                             ("mean", "std", "min", "max", "median", "p95", "p99")])
                 groups.append(gi)
         ax = fig.add_axes([0.04, 0.07, 0.92, 0.80])
         ax.axis("off")
         tbl = ax.table(cellText=body, colLabels=header, loc="upper center",
-                       colWidths=[0.07, 0.17, 0.14] + [0.105] * 6, cellLoc="right")
+                       colWidths=[0.07, 0.16, 0.13] + [0.091] * 7, cellLoc="right")
         tbl.auto_set_font_size(False)
         tbl.set_fontsize(9.5)
         tbl.scale(1, 1.55)
@@ -338,6 +341,9 @@ def main():
     ap.add_argument("--manifest", help="manifest.yaml describing the execution plan")
     ap.add_argument("--project", default="project")
     ap.add_argument("--test-name", default="test")
+    ap.add_argument("--skip-iterations", type=int, default=1,
+                    help="warm-up iterations (#0 .. #N-1) left out of the statistics; "
+                         "perf.csv and the Gantt pages keep them (default: %(default)s)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -349,7 +355,16 @@ def main():
 
     manifest_plan, meta = load_manifest(args.manifest)
     plan = build_plan(manifest_plan, log_plan, {r["task_id"] for r in records})
-    rows = stats_rows(records, plan)
+    stat_records = [r for r in records if r["iteration"] >= args.skip_iterations]
+    if not stat_records:
+        print(f"[WARN] no iteration >= {args.skip_iterations} in the logs: "
+              "statistics computed on all iterations.", file=sys.stderr)
+        stat_records = records
+    stat_its = sorted({r["iteration"] for r in stat_records})
+    stats_scope = f"#{stat_its[0]} - #{stat_its[-1]}" + (
+        f" (first {args.skip_iterations} warm-up iteration(s) excluded)"
+        if stat_records is not records and args.skip_iterations > 0 else "")
+    rows = stats_rows(stat_records, plan)
     write_csvs(out, records, rows, plan)
 
     by_it = defaultdict(list)
@@ -370,11 +385,13 @@ def main():
         "test_name": args.test_name,
         "pages": pages,
         "footer": f"{args.project} / {args.test_name}",
+        "stats_scope": f"  |  iterations {stats_scope}",
         "lines": [
             ("Generated", datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             ("Schedule", meta.get("name") or "n/a"),
             ("Iterations in logs", f"{len(iterations)}  (#{iterations[0]} - #{iterations[-1]})"
              + (f", manifest declares {meta['iterations']}" if meta.get("iterations") else "")),
+            ("Statistics on", f"iterations {stats_scope}"),
             ("Tasks", ", ".join(f"{t}={plan[t]['image']}" for t in sorted(plan))),
             ("Cores used", ", ".join(str(c) for c in cores)),
             ("PERF records", f"{len(records)}" + (f"  ({malformed} malformed skipped)" if malformed else "")),

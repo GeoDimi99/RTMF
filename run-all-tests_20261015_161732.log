@@ -1,0 +1,26 @@
+[INFO] Campaign: iterations=300 run_id=1
+[INFO] Implementations: choreography-mqueue choreography-zeromq orchestration-grpc orchestration-mqueue
+[INFO] Tests: single_core single_core_nort dual_core_sep dual_core_mix three_core_sep three_core_mix quad_core_sep quad_core_mix
+[INFO] Campaign log: /home/khadas/seip-jeff/rtmf/run-all-tests_20261015_161732.log
+
+================================================================
+[RUN ] (1/32) choreography-mqueue / test_single_core_it300_1   (2026-10-15 16:17:32)
+================================================================
+[OK  ] choreography-mqueue / test_single_core_it300_1  (exit 0, 774s)
+
+================================================================
+[RUN ] (2/32) choreography-mqueue / test_single_core_nort_it300_1   (2026-10-15 16:30:26)
+================================================================
+[OK  ] choreography-mqueue / test_single_core_nort_it300_1  (exit 0, 770s)
+
+================================================================
+[RUN ] (3/32) choreography-mqueue / test_dual_core_sep_it300_1   (2026-10-15 16:43:16)
+================================================================
+[FAIL] choreography-mqueue / test_dual_core_sep_it300_1  (exit 130, 125s)
+
+======================== SUMMARY ========================
+  OK    choreography-mqueue/test_single_core_it300_1  (774s)
+  OK    choreography-mqueue/test_single_core_nort_it300_1  (770s)
+  FAIL  choreography-mqueue/test_dual_core_sep_it300_1  (125s)
+  (campaign interrupted by the user)
+Total time: 27 min

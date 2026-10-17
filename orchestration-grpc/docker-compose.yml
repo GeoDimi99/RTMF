@@ -16,6 +16,7 @@ services:
     network_mode: host  # Use host networking to reach task services on localhost
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/rtmf-grpc-ipc:/ipc  # gRPC Unix sockets of the task services (readiness check)
     depends_on:
       - redis
 
@@ -27,6 +28,8 @@ services:
     cpuset: "4"
     container_name: execution-manager-grpc
     network_mode: host  # Use host networking for minimal latency
+    volumes:
+      - /tmp/rtmf-grpc-ipc:/ipc  # gRPC Unix sockets of the task services
     cap_add:
       - SYS_NICE  # Allows real-time scheduling (SCHED_FIFO/SCHED_RR)
      # Note: deploy-manager is not a dependency because we only need Redis data,
