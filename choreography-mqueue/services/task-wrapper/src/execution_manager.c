@@ -1,6 +1,9 @@
 #include "execution_manager.h"
 #include "logger.h"
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/eventfd.h>
+#include <glib-unix.h>
 
 gint iteration = 0; // Counter for measure the performance
 
@@ -83,6 +86,72 @@ void free_input_list(GSList *list) {
 
 
 /* ----------------- Executor Manager Constructor/Distructors ----------------- */
+/* ----------------- Result hand-off: task thread -> scheduler main loop ----------------- */
+/* After the task, its thread must not block: a SCHED_FIFO thread that sleeps (e.g. on the
+ * stdout lock or on the results mutex, contended by the sibling threads of the process) is
+ * requeued at the TAIL of its priority list, behind a same-priority task already waiting on
+ * its core, and resumes only after that whole task. So the task thread only pushes its
+ * record on a lock-free list and wakes the main loop (eventfd); the main loop stores the
+ * result, measures end_time_result and logs the performance, as the Execution Manager does
+ * in the orchestration versions. */
+static task_wrapper_input_t *results_head = NULL;  // Completed tasks (lock-free LIFO)
+static gint results_efd = -1;                       // Wakes the main loop
+static guint results_watch = 0;                     // Main loop source of results_efd
+static gint results_boost_prio = 0;                 // SCHED_FIFO priority of the scheduler (hand-off boost)
+
+/* Called by the task thread: lock-free push, then wake the main loop. tw_input is owned
+ * (and freed) by the main loop from here on. */
+static void results_post(task_wrapper_input_t *tw_input) {
+    task_wrapper_input_t *head = __atomic_load_n(&results_head, __ATOMIC_RELAXED);
+    do {
+        tw_input->next = head;
+    } while (!__atomic_compare_exchange_n(&results_head, &head, tw_input, TRUE, __ATOMIC_RELEASE, __ATOMIC_RELAXED));
+
+    guint64 one = 1;
+    if (write(results_efd, &one, sizeof(one)) != sizeof(one)) {
+        /* Only on counter overflow: the record is already in the list, drained on the next wake-up */
+    }
+}
+
+/* Main loop: store the results of the completed tasks and log their performance */
+static gboolean handle_task_results(gint fd, GIOCondition condition, gpointer user_data) {
+    (void)condition; (void)user_data;
+    guint64 count;
+    if (read(fd, &count, sizeof(count)) != sizeof(count)) {
+        /* EAGAIN: already drained by a previous wake-up */
+    }
+
+    /* Take the whole list and restore the completion order */
+    task_wrapper_input_t *list = __atomic_exchange_n(&results_head, NULL, __ATOMIC_ACQUIRE);
+    task_wrapper_input_t *ordered = NULL;
+    while (list) {
+        task_wrapper_input_t *next = list->next;
+        list->next = ordered;
+        ordered = list;
+        list = next;
+    }
+
+    while (ordered) {
+        task_wrapper_input_t *r = ordered;
+        ordered = r->next;
+
+        /* Write the result */
+        schedule_set_result(r->sched, r->task_id, "{}");
+
+        /* Measure the end_time_result (for the performance): after the result is stored in the schedule */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        glong end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
+        /* -------------------------------------------------- */
+
+        /* Log the performance metrics to be analysed */
+        log_perf("task-wrapper", r->iteration, r->task_id, r->start_time_request, r->end_time_request, r->start_time_result, end_time_result, r->core_id);
+
+        g_free(r);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
 execution_manager_t* em_new(const gchar *name){
     g_return_val_if_fail(name != NULL, NULL);
 
@@ -113,6 +182,20 @@ execution_manager_t* em_new(const gchar *name){
     }
     em->redis_client = c;
 
+    /* Result hand-off from the task threads to the main loop */
+    /* The task threads do the hand-off at the scheduler priority (see task_wrapper_func) */
+    struct sched_param em_param;
+    if (sched_getscheduler(0) == SCHED_FIFO && sched_getparam(0, &em_param) == 0) {
+        results_boost_prio = em_param.sched_priority;
+    }
+
+    results_efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (results_efd < 0) {
+        log_message(LOG_ERROR, "task-wrapper", "eventfd failed: %s", g_strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+    results_watch = g_unix_fd_add(results_efd, G_IO_IN, handle_task_results, NULL);
+
     return em;
 }
 
@@ -127,6 +210,11 @@ void em_free(execution_manager_t *em){
     }
 
     redisFree(em->redis_client);
+
+    if (results_watch) g_source_remove(results_watch);
+    if (results_efd >= 0) close(results_efd);
+    results_watch = 0;
+    results_efd = -1;
 
     g_free(em);
 }
@@ -446,8 +534,6 @@ void* task_wrapper_func(void* data){
     guint16 task_id = tw_input->task_id;
     gpointer input = tw_input->data;
     GThreadFunc thread_func = tw_input->thread_func;
-    schedule_t* sched = tw_input->sched;
-    glong start_time_request = tw_input->start_time_request; // Dispatch time, for measure the performance
 
     /* Measure the end_time_request (for the performance) */
     struct timespec ts;
@@ -475,22 +561,34 @@ void* task_wrapper_func(void* data){
     glong start_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
     /* -------------------------------------------------- */
 
-    /* Write the result */
-    schedule_set_result(sched, task_id, "{}");
+    /* Hand the result to the scheduler main loop: it stores it, measures end_time_result and
+     * logs the performance (see results_post). No blocking call before this point. */
+    tw_input->end_time_request = end_time_request;
+    tw_input->start_time_result = start_time_result;
+    tw_input->core_id = core_id;
 
-    /* Measure the end_time_result (for the performance): after the result is stored in the schedule */
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    glong end_time_result = ts.tv_sec * 1000000000L + ts.tv_nsec;
-    /* -------------------------------------------------- */
+    /* On PREEMPT_RT the kernel lock of the eventfd written by results_post() is a sleeping lock,
+     * shared with the main loop: if the thread sleeps on it, it is woken at the TAIL of its
+     * SCHED_FIFO priority and waits for a whole same-priority task of its core. So RT task
+     * threads do the hand-off at the scheduler priority and then go back to their own. */
+    gint policy = tw_input->policy;
+    struct sched_param task_param = { .sched_priority = tw_input->priority };
+    gboolean boost = (policy == SCHED_FIFO || policy == SCHED_RR) && results_boost_prio > task_param.sched_priority;
+    if (boost) {
+        struct sched_param boost_param = { .sched_priority = results_boost_prio };
+        pthread_setschedparam(pthread_self(), SCHED_FIFO, &boost_param);
+    }
+
+    results_post(tw_input);      // tw_input is owned by the main loop from here on
+
+    if (boost) {
+        pthread_setschedparam(pthread_self(), policy, &task_param);
+    }
 
     log_message(LOG_DEBUG, "task-wrapper", "ThreadCall %u: termination thread function", task_id);
 
-    /* Log the performance metrics to be analysed */
-    log_perf("task-wrapper", iteration, task_id, start_time_request, end_time_request, start_time_result, end_time_result, core_id);
-
-    /* Cleanup */
+    /* Cleanup (tw_input is freed by the main loop) */
     g_free(res);
-    g_free(tw_input);
     return NULL;
 
 }
@@ -522,6 +620,7 @@ gboolean handle_initialization(gpointer user_data) {
         tw_input->sched = sched;
         tw_input->policy = task->policy;
         tw_input->priority = task->priority;
+        tw_input->iteration = iteration;    // Iteration of this activation (for the performance)
 
         /* Measure the start_time_request (for the performance) */
         struct timespec ts;

@@ -58,7 +58,7 @@ typedef struct {
 } deadline_context_t;
 
 
-typedef struct {
+typedef struct task_wrapper_input_t {
     guint16 task_id;            // Task ID
     gpointer data;              // Task input
     GThreadFunc thread_func;    // Task function
@@ -66,6 +66,12 @@ typedef struct {
     glong start_time_request;   // For measure the performance (dispatch time, before thread creation)
     gint policy;                // Scheduler policy of the task thread
     gint8 priority;             // RT priority (FIFO/RR) or nice value (OTHER/BATCH)
+    /* Result record, filled by the task thread and handed to the scheduler main loop */
+    gint iteration;             // Iteration the activation belongs to (for the performance)
+    glong end_time_request;     // Beginning of the task thread execution (for the performance)
+    glong start_time_result;    // End of the task thread execution (for the performance)
+    gint core_id;               // Core the task thread ran on (for the performance)
+    struct task_wrapper_input_t *next;  // Lock-free list of the completed tasks
 } task_wrapper_input_t;
 
 

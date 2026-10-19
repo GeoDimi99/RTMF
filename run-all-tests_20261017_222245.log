@@ -1,0 +1,247 @@
+[INFO] Campaign: iterations=301 run_id=1
+[INFO] Implementations: native choreography-mqueue choreography-zeromq orchestration-grpc orchestration-mqueue
+[INFO] Tests: single_core single_core_nort dual_core_sep dual_core_mix three_core_sep three_core_mix quad_core_sep quad_core_mix
+[INFO] Campaign log: /home/khadas/seip-jeff/rtmf/run-all-tests_20261017_222245.log
+
+================================================================
+[RUN ] (1/40) native / test_single_core_it301_1   (2026-10-17 22:22:45)
+================================================================
+[OK  ] native / test_single_core_it301_1  (exit 0, 461s)
+
+================================================================
+[RUN ] (2/40) native / test_single_core_nort_it301_1   (2026-10-17 22:30:26)
+================================================================
+[OK  ] native / test_single_core_nort_it301_1  (exit 0, 460s)
+
+================================================================
+[RUN ] (3/40) native / test_dual_core_sep_it301_1   (2026-10-17 22:38:06)
+================================================================
+[OK  ] native / test_dual_core_sep_it301_1  (exit 0, 459s)
+
+================================================================
+[RUN ] (4/40) native / test_dual_core_mix_it301_1   (2026-10-17 22:45:45)
+================================================================
+[OK  ] native / test_dual_core_mix_it301_1  (exit 0, 525s)
+
+================================================================
+[RUN ] (5/40) native / test_three_core_sep_it301_1   (2026-10-17 22:54:31)
+================================================================
+[OK  ] native / test_three_core_sep_it301_1  (exit 0, 524s)
+
+================================================================
+[RUN ] (6/40) native / test_three_core_mix_it301_1   (2026-10-17 23:03:15)
+================================================================
+[OK  ] native / test_three_core_mix_it301_1  (exit 0, 591s)
+
+================================================================
+[RUN ] (7/40) native / test_quad_core_sep_it301_1   (2026-10-17 23:13:06)
+================================================================
+[OK  ] native / test_quad_core_sep_it301_1  (exit 0, 595s)
+
+================================================================
+[RUN ] (8/40) native / test_quad_core_mix_it301_1   (2026-10-17 23:23:01)
+================================================================
+[OK  ] native / test_quad_core_mix_it301_1  (exit 0, 656s)
+
+================================================================
+[RUN ] (9/40) choreography-mqueue / test_single_core_it301_1   (2026-10-17 23:33:57)
+================================================================
+[OK  ] choreography-mqueue / test_single_core_it301_1  (exit 0, 856s)
+
+================================================================
+[RUN ] (10/40) choreography-mqueue / test_single_core_nort_it301_1   (2026-10-17 23:48:13)
+================================================================
+[FAIL] choreography-mqueue / test_single_core_nort_it301_1  (exit 1, 160s)
+
+================================================================
+[RUN ] (11/40) choreography-mqueue / test_dual_core_sep_it301_1   (2026-10-17 23:50:53)
+================================================================
+[OK  ] choreography-mqueue / test_dual_core_sep_it301_1  (exit 0, 795s)
+
+================================================================
+[RUN ] (12/40) choreography-mqueue / test_dual_core_mix_it301_1   (2026-10-18 00:04:08)
+================================================================
+[OK  ] choreography-mqueue / test_dual_core_mix_it301_1  (exit 0, 858s)
+
+================================================================
+[RUN ] (13/40) choreography-mqueue / test_three_core_sep_it301_1   (2026-10-18 00:18:26)
+================================================================
+[OK  ] choreography-mqueue / test_three_core_sep_it301_1  (exit 0, 849s)
+
+================================================================
+[RUN ] (14/40) choreography-mqueue / test_three_core_mix_it301_1   (2026-10-18 00:32:35)
+================================================================
+[OK  ] choreography-mqueue / test_three_core_mix_it301_1  (exit 0, 922s)
+
+================================================================
+[RUN ] (15/40) choreography-mqueue / test_quad_core_sep_it301_1   (2026-10-18 00:47:57)
+================================================================
+[OK  ] choreography-mqueue / test_quad_core_sep_it301_1  (exit 0, 915s)
+
+================================================================
+[RUN ] (16/40) choreography-mqueue / test_quad_core_mix_it301_1   (2026-10-18 01:03:12)
+================================================================
+[OK  ] choreography-mqueue / test_quad_core_mix_it301_1  (exit 0, 992s)
+
+================================================================
+[RUN ] (17/40) choreography-zeromq / test_single_core_it301_1   (2026-10-18 01:19:44)
+================================================================
+[OK  ] choreography-zeromq / test_single_core_it301_1  (exit 0, 1029s)
+
+================================================================
+[RUN ] (18/40) choreography-zeromq / test_single_core_nort_it301_1   (2026-10-18 01:36:53)
+================================================================
+[OK  ] choreography-zeromq / test_single_core_nort_it301_1  (exit 0, 790s)
+
+================================================================
+[RUN ] (19/40) choreography-zeromq / test_dual_core_sep_it301_1   (2026-10-18 01:50:03)
+================================================================
+[OK  ] choreography-zeromq / test_dual_core_sep_it301_1  (exit 0, 792s)
+
+================================================================
+[RUN ] (20/40) choreography-zeromq / test_dual_core_mix_it301_1   (2026-10-18 02:03:15)
+================================================================
+[OK  ] choreography-zeromq / test_dual_core_mix_it301_1  (exit 0, 867s)
+
+================================================================
+[RUN ] (21/40) choreography-zeromq / test_three_core_sep_it301_1   (2026-10-18 02:17:42)
+================================================================
+[OK  ] choreography-zeromq / test_three_core_sep_it301_1  (exit 0, 854s)
+
+================================================================
+[RUN ] (22/40) choreography-zeromq / test_three_core_mix_it301_1   (2026-10-18 02:31:56)
+================================================================
+[OK  ] choreography-zeromq / test_three_core_mix_it301_1  (exit 0, 930s)
+
+================================================================
+[RUN ] (23/40) choreography-zeromq / test_quad_core_sep_it301_1   (2026-10-18 02:47:26)
+================================================================
+[OK  ] choreography-zeromq / test_quad_core_sep_it301_1  (exit 0, 929s)
+
+================================================================
+[RUN ] (24/40) choreography-zeromq / test_quad_core_mix_it301_1   (2026-10-18 03:02:55)
+================================================================
+[OK  ] choreography-zeromq / test_quad_core_mix_it301_1  (exit 0, 997s)
+
+================================================================
+[RUN ] (25/40) orchestration-grpc / test_single_core_it301_1   (2026-10-18 03:19:32)
+================================================================
+[OK  ] orchestration-grpc / test_single_core_it301_1  (exit 0, 1022s)
+
+================================================================
+[RUN ] (26/40) orchestration-grpc / test_single_core_nort_it301_1   (2026-10-18 03:36:34)
+================================================================
+[OK  ] orchestration-grpc / test_single_core_nort_it301_1  (exit 0, 811s)
+
+================================================================
+[RUN ] (27/40) orchestration-grpc / test_dual_core_sep_it301_1   (2026-10-18 03:50:05)
+================================================================
+[OK  ] orchestration-grpc / test_dual_core_sep_it301_1  (exit 0, 803s)
+
+================================================================
+[RUN ] (28/40) orchestration-grpc / test_dual_core_mix_it301_1   (2026-10-18 04:03:28)
+================================================================
+[OK  ] orchestration-grpc / test_dual_core_mix_it301_1  (exit 0, 851s)
+
+================================================================
+[RUN ] (29/40) orchestration-grpc / test_three_core_sep_it301_1   (2026-10-18 04:17:39)
+================================================================
+[OK  ] orchestration-grpc / test_three_core_sep_it301_1  (exit 0, 842s)
+
+================================================================
+[RUN ] (30/40) orchestration-grpc / test_three_core_mix_it301_1   (2026-10-18 04:31:41)
+================================================================
+[OK  ] orchestration-grpc / test_three_core_mix_it301_1  (exit 0, 933s)
+
+================================================================
+[RUN ] (31/40) orchestration-grpc / test_quad_core_sep_it301_1   (2026-10-18 04:47:14)
+================================================================
+[OK  ] orchestration-grpc / test_quad_core_sep_it301_1  (exit 0, 916s)
+
+================================================================
+[RUN ] (32/40) orchestration-grpc / test_quad_core_mix_it301_1   (2026-10-18 05:02:30)
+================================================================
+[OK  ] orchestration-grpc / test_quad_core_mix_it301_1  (exit 0, 1005s)
+
+================================================================
+[RUN ] (33/40) orchestration-mqueue / test_single_core_it301_1   (2026-10-18 05:19:15)
+================================================================
+[OK  ] orchestration-mqueue / test_single_core_it301_1  (exit 0, 892s)
+
+================================================================
+[RUN ] (34/40) orchestration-mqueue / test_single_core_nort_it301_1   (2026-10-18 05:34:07)
+================================================================
+[OK  ] orchestration-mqueue / test_single_core_nort_it301_1  (exit 0, 700s)
+
+================================================================
+[RUN ] (35/40) orchestration-mqueue / test_dual_core_sep_it301_1   (2026-10-18 05:45:47)
+================================================================
+[OK  ] orchestration-mqueue / test_dual_core_sep_it301_1  (exit 0, 710s)
+
+================================================================
+[RUN ] (36/40) orchestration-mqueue / test_dual_core_mix_it301_1   (2026-10-18 05:57:37)
+================================================================
+[OK  ] orchestration-mqueue / test_dual_core_mix_it301_1  (exit 0, 760s)
+
+================================================================
+[RUN ] (37/40) orchestration-mqueue / test_three_core_sep_it301_1   (2026-10-18 06:10:17)
+================================================================
+[OK  ] orchestration-mqueue / test_three_core_sep_it301_1  (exit 0, 777s)
+
+================================================================
+[RUN ] (38/40) orchestration-mqueue / test_three_core_mix_it301_1   (2026-10-18 06:23:14)
+================================================================
+[OK  ] orchestration-mqueue / test_three_core_mix_it301_1  (exit 0, 832s)
+
+================================================================
+[RUN ] (39/40) orchestration-mqueue / test_quad_core_sep_it301_1   (2026-10-18 06:37:06)
+================================================================
+[OK  ] orchestration-mqueue / test_quad_core_sep_it301_1  (exit 0, 845s)
+
+================================================================
+[RUN ] (40/40) orchestration-mqueue / test_quad_core_mix_it301_1   (2026-10-18 06:51:11)
+================================================================
+[OK  ] orchestration-mqueue / test_quad_core_mix_it301_1  (exit 0, 908s)
+
+======================== SUMMARY ========================
+  OK    native/test_single_core_it301_1  (461s)
+  OK    native/test_single_core_nort_it301_1  (460s)
+  OK    native/test_dual_core_sep_it301_1  (459s)
+  OK    native/test_dual_core_mix_it301_1  (525s)
+  OK    native/test_three_core_sep_it301_1  (524s)
+  OK    native/test_three_core_mix_it301_1  (591s)
+  OK    native/test_quad_core_sep_it301_1  (595s)
+  OK    native/test_quad_core_mix_it301_1  (656s)
+  OK    choreography-mqueue/test_single_core_it301_1  (856s)
+  FAIL  choreography-mqueue/test_single_core_nort_it301_1  (160s)
+  OK    choreography-mqueue/test_dual_core_sep_it301_1  (795s)
+  OK    choreography-mqueue/test_dual_core_mix_it301_1  (858s)
+  OK    choreography-mqueue/test_three_core_sep_it301_1  (849s)
+  OK    choreography-mqueue/test_three_core_mix_it301_1  (922s)
+  OK    choreography-mqueue/test_quad_core_sep_it301_1  (915s)
+  OK    choreography-mqueue/test_quad_core_mix_it301_1  (992s)
+  OK    choreography-zeromq/test_single_core_it301_1  (1029s)
+  OK    choreography-zeromq/test_single_core_nort_it301_1  (790s)
+  OK    choreography-zeromq/test_dual_core_sep_it301_1  (792s)
+  OK    choreography-zeromq/test_dual_core_mix_it301_1  (867s)
+  OK    choreography-zeromq/test_three_core_sep_it301_1  (854s)
+  OK    choreography-zeromq/test_three_core_mix_it301_1  (930s)
+  OK    choreography-zeromq/test_quad_core_sep_it301_1  (929s)
+  OK    choreography-zeromq/test_quad_core_mix_it301_1  (997s)
+  OK    orchestration-grpc/test_single_core_it301_1  (1022s)
+  OK    orchestration-grpc/test_single_core_nort_it301_1  (811s)
+  OK    orchestration-grpc/test_dual_core_sep_it301_1  (803s)
+  OK    orchestration-grpc/test_dual_core_mix_it301_1  (851s)
+  OK    orchestration-grpc/test_three_core_sep_it301_1  (842s)
+  OK    orchestration-grpc/test_three_core_mix_it301_1  (933s)
+  OK    orchestration-grpc/test_quad_core_sep_it301_1  (916s)
+  OK    orchestration-grpc/test_quad_core_mix_it301_1  (1005s)
+  OK    orchestration-mqueue/test_single_core_it301_1  (892s)
+  OK    orchestration-mqueue/test_single_core_nort_it301_1  (700s)
+  OK    orchestration-mqueue/test_dual_core_sep_it301_1  (710s)
+  OK    orchestration-mqueue/test_dual_core_mix_it301_1  (760s)
+  OK    orchestration-mqueue/test_three_core_sep_it301_1  (777s)
+  OK    orchestration-mqueue/test_three_core_mix_it301_1  (832s)
+  OK    orchestration-mqueue/test_quad_core_sep_it301_1  (845s)
+  OK    orchestration-mqueue/test_quad_core_mix_it301_1  (908s)
+Total time: 523 min

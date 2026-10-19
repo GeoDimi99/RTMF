@@ -22,8 +22,10 @@
 #                 statistics cover 300 iterations)
 #    RUN_ID       suffix of the result folder names    (default: 1)
 #    IMPLS        implementations to run (space separated)
-#                 (default: choreography-mqueue choreography-zeromq
+#                 (default: native choreography-mqueue choreography-zeromq
 #                           orchestration-grpc orchestration-mqueue)
+#                 native runs its binary through `sudo -n`: it needs a NOPASSWD
+#                 sudoers rule for it (checked before starting, see native/start-test.sh)
 #    TESTS        scenarios to run (space separated, names of tests/manifests/*.yaml)
 #                 (default: all of them)
 #    FORCE=1      re-run and overwrite tests whose results folder already exists
@@ -40,7 +42,7 @@ cd "$ROOT"
 
 ITERATIONS="${ITERATIONS:-301}"
 RUN_ID="${RUN_ID:-1}"
-IMPLS="${IMPLS:-choreography-mqueue choreography-zeromq orchestration-grpc orchestration-mqueue}"
+IMPLS="${IMPLS:-native choreography-mqueue choreography-zeromq orchestration-grpc orchestration-mqueue}"
 TESTS="${TESTS:-single_core single_core_nort dual_core_sep dual_core_mix three_core_sep three_core_mix quad_core_sep quad_core_mix}"
 MANIFESTS_DIR="$ROOT/tests/manifests"
 
@@ -58,6 +60,25 @@ done
 for t in $TESTS; do
     [ -f "$MANIFESTS_DIR/$t.yaml" ] || { echo "[ERROR] Missing $MANIFESTS_DIR/$t.yaml" >&2; exit 1; }
 done
+
+# native runs its binary as root through `sudo -n`: check now that it is allowed without
+# a password and that build/ is rebuildable, instead of failing every native test later
+if [[ " $IMPLS " == *" native "* ]] && [ "$(id -u)" != "0" ]; then
+    NATIVE_BUILD="$ROOT/native/services/execution-manager/build"
+    NATIVE_BIN="$NATIVE_BUILD/execution-manager"
+    if ! sudo -n -l "$NATIVE_BIN" >/dev/null 2>&1; then
+        echo "[ERROR] native needs 'sudo -n' for its binary (SCHED_FIFO, mlockall). Allow it once with:" >&2
+        echo "          echo '$(id -un) ALL=(root) NOPASSWD: $NATIVE_BIN' | sudo tee /etc/sudoers.d/rtmf-native" >&2
+        echo "          sudo chmod 440 /etc/sudoers.d/rtmf-native && sudo visudo -cf /etc/sudoers.d/rtmf-native" >&2
+        echo "        or leave native out: IMPLS=\"choreography-mqueue choreography-zeromq orchestration-grpc orchestration-mqueue\"" >&2
+        exit 1
+    fi
+    if [ -e "$NATIVE_BUILD" ] && [ "$(find "$NATIVE_BUILD" ! -user "$(id -u)" -print -quit)" ]; then
+        echo "[ERROR] $NATIVE_BUILD has files owned by another user. Fix it once with:" >&2
+        echo "          sudo chown -R $(id -un): $NATIVE_BUILD" >&2
+        exit 1
+    fi
+fi
 
 CAMPAIGN_LOG="$ROOT/run-all-tests_$(date +%Y%m%d_%H%M%S).log"
 

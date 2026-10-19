@@ -1,0 +1,20 @@
+[INFO] Campaign: iterations=301 run_id=1
+[INFO] Implementations: native choreography-mqueue choreography-zeromq
+[INFO] Tests: quad_core_sep
+[INFO] Campaign log: /home/khadas/seip-jeff/rtmf/run-all-tests_20261019_122646.log
+
+================================================================
+[RUN ] (1/3) native / test_quad_core_sep_it301_1   (2026-10-19 12:26:46)
+================================================================
+[OK  ] native / test_quad_core_sep_it301_1  (exit 0, 593s)
+
+================================================================
+[RUN ] (2/3) choreography-mqueue / test_quad_core_sep_it301_1   (2026-10-19 12:36:39)
+================================================================
+[OK  ] choreography-mqueue / test_quad_core_sep_it301_1  (exit 0, 576s)
+
+======================== SUMMARY ========================
+  OK    native/test_quad_core_sep_it301_1  (593s)
+  OK    choreography-mqueue/test_quad_core_sep_it301_1  (576s)
+  (campaign interrupted by the user)
+Total time: 19 min

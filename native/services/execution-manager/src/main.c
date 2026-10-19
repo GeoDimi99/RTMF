@@ -10,6 +10,7 @@
 #include "execution_manager.h"
 #include "app_task.h"
 #include "logger.h"
+#include "schedule_plan.h"     // Generated from the manifest
 #include <stdlib.h>
 
 
@@ -74,7 +75,7 @@ int main(int argc, char *argv[]) {
 
     /* -------------- Main Loop Execution -------------- */
     //while (keep_running) {
-    int num_iter = 100;
+    int num_iter = PLAN_ITERATIONS;
     for(int i=0; i < num_iter && keep_running; i++){     // For test
         iteration = i; // Counter for measure the performance
 
@@ -89,189 +90,16 @@ int main(int argc, char *argv[]) {
             }
 
             /* Create a schedule */
-            gchar *schedule_name = "schedule";
+            gchar *schedule_name = PLAN_SCHEDULE_NAME;
             sched = schedule_new(schedule_name, "0.0.1");
             if (!sched) {
                 log_message(LOG_ERROR, "execution-manager", "(%s) : scheduler creation failed", schedule_name);
                 exit(EXIT_FAILURE);
             }
 
-            
-
-            // void schedule_add_task(schedule_t *sched, guint16 id, const gchar *name, GThreadFunc task_exec, gint policy, gint8 priority, gint cpu_affinity, guint8 repetition, GSList *depends_on,  gint64 start_time, gint64 end_time, gpointer input);
-            //   policy:   SCHED_FIFO, SCHED_RR             -> priority is the RT priority (1..99)
-            //             SCHED_OTHER (SCHED_NORMAL), SCHED_BATCH -> priority is the nice value (-20..19)
-            //             SCHED_IDLE                       -> priority is ignored (use 0)
-            
-
-            /* ***********************************
-            *  TEST 1: SINGLE TASK - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-            // input_t *func_input = g_new0(input_t, 1); 
-
-            /* Test 1: Single Task - Num operation 100, IO Burst: 0% */
-            // func_input->total_ops = 800;
-            // func_input->io_percentage = 0;
-            // schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 1, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 1000, 5000, func_input);
-
-            /* Test 1: Single Task - Num operation 4, IO Burst: 25% */
-            // func_input->total_ops = 800;
-            // func_input->io_percentage = 25;
-            // schedule_add_task(sched, 2, "stress_task_1", task_main, SCHED_FIFO, 1, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 1000, 5000, func_input);
-
-            /* Test 1: Single Task - Num operation 4, IO Burst: 50% */
-            // func_input->total_ops = 800;
-            // func_input->io_percentage = 50;
-            // schedule_add_task(sched, 3, "stress_task_1", task_main, SCHED_FIFO, 1, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 1000, 5000, func_input);
-
-            /* Test 1: Single Task - Num operation 4, IO Burst: 75% */
-            // func_input->total_ops = 800;
-            // func_input->io_percentage = 75;
-            // schedule_add_task(sched, 4, "stress_task_1", task_main, SCHED_FIFO, 1, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 1000, 5000, func_input);
-
-            /* Test 1: Single Task - Num operation 4, IO Burst: 100% */
-            // func_input->total_ops = 800;
-            // func_input->io_percentage = 100;
-            // schedule_add_task(sched, 5, "stress_task_1", task_main, SCHED_FIFO, 1, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 1000, 5000, func_input);
-
-            /* ***********************************
-            *  TEST 2: FOUR TASKS SEQUENTIAL - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-            // input_t *func_input_1 = g_new0(input_t, 1);
-            // func_input_1->total_ops = 800;
-            // func_input_1->io_percentage = 50;
-            // schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 10 * 1000, 30 * 1000, func_input_1);
-
-            // input_t *func_input_2 = g_new0(input_t, 1);
-            // func_input_2->total_ops = 800;
-            // func_input_2->io_percentage = 50;
-            // schedule_add_task(sched, 2, "stress_task_2", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 15 * 1000, 35 * 1000, func_input_2);
-
-            // input_t *func_input_3 = g_new0(input_t, 1);
-            // func_input_3->total_ops = 800;
-            // func_input_3->io_percentage = 50;
-            // schedule_add_task(sched, 3, "stress_task_3", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 20 * 1000, 40 * 1000, func_input_3);
-
-            // input_t *func_input_4 = g_new0(input_t, 1);
-            // func_input_4->total_ops = 800;
-            // func_input_4->io_percentage = 50;
-            // schedule_add_task(sched, 4, "stress_task_4", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 25 * 1000, 45 * 1000, func_input_4);
-
-
-             /* ***********************************
-            *  TEST 3: FOUR TASKS SOVRAPOSITION 2-2 - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-            // input_t *func_input_1 = g_new0(input_t, 1);
-            // func_input_1->total_ops = 800;
-            // func_input_1->io_percentage = 50;
-            // schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 10 * 1000, 30 * 1000, func_input_1);
-
-            // input_t *func_input_2 = g_new0(input_t, 1);
-            // func_input_2->total_ops = 800;
-            // func_input_2->io_percentage = 50;
-            // schedule_add_task(sched, 2, "stress_task_2", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 11 * 1000, 31 * 1000, func_input_2);
-
-            // input_t *func_input_3 = g_new0(input_t, 1);
-            // func_input_3->total_ops = 800;
-            // func_input_3->io_percentage = 50;
-            // schedule_add_task(sched, 3, "stress_task_3", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 20 * 1000, 40 * 1000, func_input_3);
-
-            // input_t *func_input_4 = g_new0(input_t, 1);
-            // func_input_4->total_ops = 800;
-            // func_input_4->io_percentage = 50;
-            // schedule_add_task(sched, 4, "stress_task_4", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 21 * 1000, 41 * 1000, func_input_4);
-
-            /* ***********************************
-            *  TEST 4: FOUR TASKS SOVRAPOSITION 2-2 DIFFERENT PRIORITY - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-            // input_t *func_input_1 = g_new0(input_t, 1);
-            // func_input_1->total_ops = 800;
-            // func_input_1->io_percentage = 50;
-            // schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 10 * 1000, 30 * 1000, func_input_1);
-
-            // input_t *func_input_2 = g_new0(input_t, 1);
-            // func_input_2->total_ops = 800;
-            // func_input_2->io_percentage = 50;
-            // schedule_add_task(sched, 2, "stress_task_2", task_main, SCHED_FIFO, 65, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 11 * 1000, 31 * 1000, func_input_2);
-
-            // input_t *func_input_3 = g_new0(input_t, 1);
-            // func_input_3->total_ops = 800;
-            // func_input_3->io_percentage = 50;
-            // schedule_add_task(sched, 3, "stress_task_3", task_main, SCHED_FIFO, 65, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 20 * 1000, 40 * 1000, func_input_3);
-
-            // input_t *func_input_4 = g_new0(input_t, 1);
-            // func_input_4->total_ops = 800;
-            // func_input_4->io_percentage = 50;
-            // schedule_add_task(sched, 4, "stress_task_4", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 21 * 1000, 41 * 1000, func_input_4);
-
-            /* ***********************************
-            *  TEST 5: FOUR TASKS SOVRAPOSITION 1-3 SAME PRIORITY - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-            // input_t *func_input_1 = g_new0(input_t, 1);
-            // func_input_1->total_ops = 800;
-            // func_input_1->io_percentage = 50;
-            // schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 10 * 1000, 20 * 1000, func_input_1);
-
-            // input_t *func_input_2 = g_new0(input_t, 1);
-            // func_input_2->total_ops = 800;
-            // func_input_2->io_percentage = 50;
-            // schedule_add_task(sched, 2, "stress_task_2", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 20 * 1000, 30 * 1000, func_input_2);
-
-            // input_t *func_input_3 = g_new0(input_t, 1);
-            // func_input_3->total_ops = 800;
-            // func_input_3->io_percentage = 50;
-            // schedule_add_task(sched, 3, "stress_task_3", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 21 * 1000, 31 * 1000, func_input_3);
-
-            // input_t *func_input_4 = g_new0(input_t, 1);
-            // func_input_4->total_ops = 800;
-            // func_input_4->io_percentage = 50;
-            // schedule_add_task(sched, 4, "stress_task_4", task_main, SCHED_FIFO, 50, DEFAULT_TASK_CPU_AFFINITY, 1, NULL, 21 * 1000, 31 * 1000, func_input_4);
-
-            /* ***********************************
-            *  TEST 6: FOUR TASKS SOVRAPOSITION 1-3 DIFFERENT PRIORITY - 
-            *  - NUM OPERATION 100 , 
-            *  - IO BURST VARIABLE
-            ************************************** */
-           input_t *func_input_1 = g_new0(input_t, 1);
-func_input_1->total_ops = 17;
-func_input_1->io_percentage = 0;
-schedule_add_task(sched, 1, "stress_task_1", task_main, SCHED_FIFO, 50, 5, 1, NULL, 50, 650, func_input_1);
-
-input_t *func_input_2 = g_new0(input_t, 1);
-func_input_2->total_ops = 17;
-func_input_2->io_percentage = 0;
-schedule_add_task(sched, 2, "stress_task_2", task_main, SCHED_FIFO, 50, 5, 1, NULL, 300, 1300, func_input_2);
-
-input_t *func_input_3 = g_new0(input_t, 1);
-func_input_3->total_ops = 17;
-func_input_3->io_percentage = 0;
-schedule_add_task(sched, 3, "stress_task_3", task_main, SCHED_FIFO, 70, 5, 1, NULL, 350, 950, func_input_3);
-
-input_t *func_input_4 = g_new0(input_t, 1);
-func_input_4->total_ops = 17;
-func_input_4->io_percentage = 0;
-schedule_add_task(sched, 4, "stress_task_4", task_main, SCHED_FIFO, 60, 5, 1, NULL, 370, 970, func_input_4);
-
-input_t *func_input_5 = g_new0(input_t, 1);
-func_input_5->total_ops = 17;
-func_input_5->io_percentage = 0;
-schedule_add_task(sched, 5, "stress_task_5", task_main, SCHED_FIFO, 60, 5, 1, NULL, 600, 1200, func_input_5);
-
-input_t *func_input_6 = g_new0(input_t, 1);
-func_input_6->total_ops = 17;
-func_input_6->io_percentage = 0;
-schedule_add_task(sched, 6, "stress_task_6", task_main, SCHED_FIFO, 60, 5, 1, NULL, 650, 1250, func_input_6);
-
+            /* Add the tasks of the manifest (tests/test_0_code/manifest.yaml): schedule_plan.h is
+             * generated from it by tools/manifest_to_plan.py (start-test.sh does it before the build) */
+            schedule_plan_add_tasks(sched);
 
             schedule_print(sched);
         } else {

@@ -17,6 +17,21 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB2 REQUIRED IMPORTED_TARGET glib-2.0)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0)
 
+# Generate the schedule plan (schedule_plan.h) from the test manifest: it is regenerated
+# whenever the manifest (or the generator) changes. Override with -DPLAN_MANIFEST=<path>.
+set(PLAN_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_0_code/manifest.yaml"
+    CACHE FILEPATH "Manifest the schedule plan is generated from")
+set(PLAN_GENERATOR "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/manifest_to_plan.py")
+set(PLAN_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/schedule_plan.h")
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_custom_command(
+    OUTPUT ${PLAN_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/generated
+    COMMAND ${Python3_EXECUTABLE} ${PLAN_GENERATOR} ${PLAN_MANIFEST} ${PLAN_HEADER}
+    DEPENDS ${PLAN_MANIFEST} ${PLAN_GENERATOR}
+    COMMENT "Generating schedule_plan.h from ${PLAN_MANIFEST}"
+)
+
 # Define the executable and its source files
 add_executable(execution-manager
     src/main.c
@@ -24,6 +39,7 @@ add_executable(execution-manager
     src/schedule.c
     src/app_task.c
     ../../common/src/logger.c
+    ${PLAN_HEADER}
 )
 
 # Set include directories for the target
@@ -33,6 +49,7 @@ add_executable(execution-manager
 target_include_directories(execution-manager PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 # Find Threading support (pthread)
